@@ -6,6 +6,7 @@ Deal Post Bot v6 — Fixed Flipkart scraping + Groq title shortening
   • Updated caption: combined savings line, effective price
 """
 
+
 import os
 import re
 import json
