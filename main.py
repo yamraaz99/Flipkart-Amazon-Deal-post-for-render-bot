@@ -800,24 +800,20 @@ body{
 .img-box img{max-width:{{ img_max }}px;max-height:{{ img_max }}px;object-fit:contain}
 .info-panel{flex:1;min-width:0;width:100%}
 
-/* --- BULLETPROOF ABSOLUTE POSITIONING FOR WEASYPRINT --- */
+/* --- THE BULLETPROOF FLOAT CSS --- */
 .cpn-card {
   background: #fff;
-  display: block;
-  position: relative; /* Acts as the anchor for absolute elements */
-  /* Left padding protects the icon, Right padding protects the button */
-  padding: 18px 110px 18px 70px; 
   border: 1px solid #e7e7e7;
   border-radius: 8px;
+  padding: 16px 20px;
   margin-bottom: 20px;
+  overflow: hidden; /* This magic rule keeps the box wrapped tightly around floated elements */
 }
 .cpn-icon {
-  position: absolute;
-  left: 20px;
-  top: 50%;
-  margin-top: -12px; /* Perfect vertical centering for 24px height */
+  float: left;
   width: 34px;
-  height: 24px;
+  margin-right: 15px;
+  margin-top: 10px; /* Vertically centers the icon with the text */
 }
 .cpn-icon svg {
   width: 34px;
@@ -825,7 +821,7 @@ body{
   display: block;
 }
 .cpn-txt {
-  display: block;
+  float: left;
 }
 .cpn-title {
   font-size: 22px;
@@ -846,10 +842,8 @@ body{
   margin-left: -2px;
 }
 .cpn-right {
-  position: absolute;
-  right: 20px;
-  top: 50%;
-  margin-top: -18px; /* Perfect vertical centering for 36px button */
+  float: right;
+  margin-top: 3px; /* Vertically centers the button with the text */
 }
 .cpn-btn {
   background: #fff;
@@ -858,11 +852,10 @@ body{
   padding: 8px 18px;
   font-size: 18px;
   color: #0f1111;
-  font-family: inherit;
-  white-space: nowrap;
-  display: block;
+  display: inline-block; /* Forces it to shrink-wrap the text perfectly */
+  text-align: center;
 }
-/* ------------------------------------------------------- */
+/* --------------------------------- */
 
 .pb{color:#0f1111;font-size:16px;padding:0 12px}
 .pb-r{display:flex;justify-content:space-between;margin-bottom:9px;line-height:1.2}
@@ -907,7 +900,8 @@ body{
         </div>
       </div>
       <div class="cpn-right">
-        <button class="cpn-btn">Apply</button>
+        <!-- Replaced <button> with <div> to stop WeasyPrint stretch bugs -->
+        <div class="cpn-btn">Apply</div>
       </div>
     </div>
     {% endif %}
