@@ -20,6 +20,7 @@ import fitz
 from weasyprint import HTML
 import httpx
 import requests
+from PIL import ImageChops
 from bs4 import BeautifulSoup
 from keep_alive import keep_alive
 from fake_useragent import UserAgent
