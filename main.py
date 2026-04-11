@@ -1173,15 +1173,16 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon"):
         pixels = img.load()
         w, h = img.size
 
-        # Create a solid white background image of the same size
-        bg = PILImage.new(img.mode, img.size, (255, 255, 255))
-        # Find the difference between your image and the white background
-        diff = ImageChops.difference(img, bg)
-        # getbbox() instantly returns the borders of the non-white content!
-        bbox = diff.getbbox()
-        
+        # 4. Ultra-fast, artifact-proof cropping logic
+        # Convert image to grayscale
+        gray = img.convert("L")
+        # Tolerance check: Any pixel lighter than 250 becomes invisible to the cropper.
+        # Any pixel darker than 250 (text, borders, images) is kept.
+        bw = gray.point(lambda x: 0 if x > 250 else 255, '1')
+        bbox = bw.getbbox()
+
         if bbox:
-            # bbox is (left, top, right, bottom). We crop at bottom + 15px padding
+            # bbox[3] is the exact bottom pixel of your real content
             img = img.crop((0, 0, w, min(bbox[3] + 15, h)))
     
         # 5. Save the cropped image to a final buffer for Telegram
