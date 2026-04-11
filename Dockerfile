@@ -23,4 +23,4 @@ COPY . .
 EXPOSE 8080
 
 # This is your Start Command!
-CMD["python", "main.py"]
+CMD ["python", "main.py"]
