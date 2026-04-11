@@ -505,7 +505,7 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
     margin: 0;
   }
 
-  /* Base Reset & Variables securely injected from Python */
+  /* Base Variables */
   :root {
     --bg-color: {{ bg_color }};
     --theme-color: {{ theme_color }};
@@ -537,56 +537,69 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
       transparent 8px
     );
     padding: 35px;
-    display: flex;
-    gap: 30px;
     width: 980px; 
-    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.15);
+    overflow: hidden; /* Clears internal floats */
+    border: 1px solid #e0e0e0;
   }
 
   /* --- LEFT COLUMN: Product Image Box --- */
-  .product-image-container {
-    flex: 1;
+  .col-left {
+    float: left;
+    width: 410px;
     background-color: #ffffff;
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-    min-height: 420px; 
-    padding: 20px;
-  }
-
-  .product-image-container img {
-    max-width: 100%;
-    max-height: 380px;
-    object-fit: contain;
-  }
-
-  /* --- RIGHT COLUMN: Info Structure --- */
-  .info-container {
-    flex: 1.25; 
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  /* Shared Theme Box Styling */
-  .teal-box {
-    background-color: var(--theme-color);
-    color: var(--text-white);
-    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.08);
+    height: 480px; /* Fixed height forces absolute structure */
+    position: relative; 
     border-radius: 4px;
   }
 
+  .col-left img {
+    max-width: 370px;
+    max-height: 440px;
+    position: absolute;
+    top: 0; bottom: 0; left: 0; right: 0;
+    margin: auto; /* Perfect internal centering */
+  }
+
+  /* --- RIGHT COLUMN: Info Structure --- */
+  .col-right {
+    float: right;
+    width: 470px;
+  }
+
+  /* Shared Theme Box Styling */
+  .theme-box {
+    background-color: var(--theme-color);
+    color: var(--text-white);
+    border-radius: 4px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+
   /* 1. MARKETPLACE Header Box */
-  .marketplace-box {
-    align-self: center;
-    width: 65%; 
+  .header-wrapper {
     text-align: center;
-    padding: 12px 20px;
+    margin-bottom: 16px;
+  }
+  .marketplace-box {
+    display: inline-block;
+    width: 300px;
+    padding: 12px 10px; /* Reduced side padding slightly to fit the logo comfortably */
+    position: relative;
+    text-align: center;
+  }
+
+  /* Beautifully aligning the Logo and Text */
+  .mkt-logo {
+    width: 28px;
+    height: 28px;
+    vertical-align: middle;
+    margin-right: 10px;
+    border-radius: 4px; /* Optional: gives the square icons a soft edge */
+  }
+  .mkt-text {
     font-size: 28px;
     font-weight: 700;
     letter-spacing: 0.5px;
-    position: relative;
+    vertical-align: middle;
   }
 
   /* Custom Inline SVG for the Discount Tag (%) */
@@ -596,8 +609,6 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
     right: -28px;
     width: 58px;
     height: 58px;
-    filter: drop-shadow(2px 4px 4px rgba(0,0,0,0.25));
-    transform: rotate(15deg);
     z-index: 10;
   }
 
@@ -608,6 +619,7 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
     font-size: 20px;
     font-weight: 600;
     line-height: 1.4;
+    margin-bottom: 16px;
   }
 
   /* 3. Regular Price Box */
@@ -616,30 +628,32 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
     padding: 14px 20px;
     font-size: 19px;
     font-weight: 500;
+    margin-bottom: 16px;
   }
 
   /* 4. Checkout Price Breakdown Box */
   .breakdown-box {
-    flex-grow: 1; 
     padding: 24px 35px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
+    min-height: 180px;
   }
 
+  /* Floats mimic flex-between flawlessly in WeasyPrint */
   .breakdown-row {
-    display: flex;
-    justify-content: space-between;
+    width: 100%;
     font-size: 22px;
     margin-bottom: 12px;
     letter-spacing: 0.3px;
+    overflow: hidden; 
   }
-
+  .breakdown-row span:first-child {
+    float: left;
+    font-weight: 500;
+  }
   .breakdown-row span:last-child {
+    float: right;
     font-weight: 400; 
   }
 
-  /* Added a subtle green color to savings row so it pops beautifully against the teal/blue */
   .savings-row {
     color: #a3e6a3; 
   }
@@ -648,12 +662,23 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
     height: 2px;
     background-color: #ffffff;
     margin: 18px 0;
+    clear: both;
   }
 
   .order-total {
     font-size: 26px;
-    font-weight: 700;
     margin-bottom: 0;
+    clear: both;
+    padding-top: 5px;
+    overflow: hidden;
+  }
+  .order-total span:first-child {
+    float: left;
+    font-weight: 700;
+  }
+  .order-total span:last-child {
+    float: right;
+    font-weight: 700;
   }
 </style>
 </head>
@@ -662,42 +687,46 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
 <div class="banner-container">
   
   <!-- LEFT: Product Image Card -->
-  <div class="product-image-container">
+  <div class="col-left">
     <img src="data:image/jpeg;base64,{{ img_b64 }}" alt="product">
   </div>
 
   <!-- RIGHT: Pricing Information Stack -->
-  <div class="info-container">
+  <div class="col-right">
     
     <!-- Header -->
-    <div class="teal-box marketplace-box">
-      {{ marketplace_name }}
-      
-      <!-- SVG Tag -->
-      {% if discount_pct > 0 %}
-      <svg class="discount-tag" viewBox="0 0 100 100">
-        <path d="M 20 5 L 85 5 L 85 85 L 20 85 L 0 45 Z" fill="var(--tag-color)" />
-        <circle cx="18" cy="45" r="6" fill="var(--bg-color)"/> 
-        <!-- Dynamic Percentage Variable Injected -->
-        <text x="54" y="60" fill="#ffffff" font-size="34" font-weight="bold" font-family="Arial, sans-serif" text-anchor="middle">{{ discount_pct }}%</text>
-      </svg>
-      {% endif %}
+    <div class="header-wrapper">
+      <div class="theme-box marketplace-box">
+        
+        <!-- Render the Logo next to the text -->
+        <img src="{{ mkt_logo }}" class="mkt-logo" alt="logo">
+        <span class="mkt-text">{{ marketplace_name }}</span>
+        
+        <!-- Precision SVG Tag -->
+        {% if discount_pct > 0 %}
+        <svg class="discount-tag" viewBox="0 0 100 100">
+          <path d="M 20 5 L 85 5 L 85 85 L 20 85 L 0 45 Z" fill="var(--tag-color)" />
+          <circle cx="18" cy="45" r="6" fill="var(--bg-color)"/> 
+          <text x="52" y="56" fill="#ffffff" font-size="28" font-weight="bold" font-family="Arial, sans-serif" text-anchor="middle">{{ discount_pct }}%</text>
+        </svg>
+        {% endif %}
+      </div>
     </div>
 
     <!-- Title -->
-    <div class="teal-box title-box">
+    <div class="theme-box title-box">
       {{ product_title }}
     </div>
 
-    <!-- Retail Price (Only rendered if avg price is >= 20% higher than current price) -->
+    <!-- Retail Price (Only rendered if >= 20% diff) -->
     {% if show_regular_price %}
-    <div class="teal-box price-box">
+    <div class="theme-box price-box">
       Regular Price: &#8377;{{ regular_price_fmt }} ({{ regular_discount_pct }}% OFF)
     </div>
     {% endif %}
 
     <!-- Breakdown Bottom Block -->
-    <div class="teal-box breakdown-box">
+    <div class="theme-box breakdown-box">
       <div class="breakdown-row">
         <span>Items:</span>
         <span>&#8377;{{ price_fmt }}</span>
@@ -707,7 +736,6 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
         <span>&#8377;0.00</span>
       </div>
       
-      <!-- Dynamic Savings Loop -->
       {% for saving in savings %}
       <div class="breakdown-row savings-row">
         <span>{{ saving.label }}:</span>
@@ -717,7 +745,7 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
       
       <div class="divider"></div>
       
-      <div class="breakdown-row order-total">
+      <div class="order-total">
         <span>Order Total:</span>
         <span>&#8377;{{ effective_fmt }}</span>
       </div>
