@@ -51,7 +51,7 @@ EXT_ID = "7242722"
 EXT_AUTH = "788970602"
 
 logging.basicConfig(
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    format="%(asctime)s[%(levelname)s] %(message)s",
     level=logging.INFO,
 )
 log = logging.getLogger(__name__)
@@ -918,7 +918,7 @@ def format_caption(title, url, bd, avg_price):
     if bd.get("best_bank_disc", 0) > 0:
         bank_str = bd["best_bank"] + (" EMI" if bd.get("best_bank_is_emi") else "")
         parts.append(f"₹{bd['best_bank_disc']:,} off with {bank_str}")
-    lines = [header, ""]
+    lines =[header, ""]
     if parts: lines.append(f"<b>📌Apply {' + '.join(parts)}</b>"); lines.append("")
     lines.append(url)
     return "\n".join(lines)
@@ -989,19 +989,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         scraped = scraped_result
         image_url = details.get("image", "")
-        price = scraped.get("current_price") or details.get("price") or 0
+        
+        # Fixed: using _clean_price to prevent string-with-comma ValueError
+        price = scraped.get("current_price") or _clean_price(details.get("price")) or 0
         if not price and thunder.get("avg"): price = int(thunder["avg"])
         
-        # Safely extract MRPs from both sources
-        try:
-            api_mrp = int(details.get("mrp") or 0)
-        except (ValueError, TypeError):
-            api_mrp = 0
-            
-        try:
-            scraped_mrp = int(scraped.get("mrp") or 0)
-        except (ValueError, TypeError):
-            scraped_mrp = 0
+        # Safely extract MRPs from both sources stripping commas
+        api_mrp = _clean_price(details.get("mrp")) or 0
+        scraped_mrp = _clean_price(scraped.get("mrp")) or 0
             
         # The true MRP is always the highest valid number we found from ANY source
         mrp = max(scraped_mrp, api_mrp, price)
