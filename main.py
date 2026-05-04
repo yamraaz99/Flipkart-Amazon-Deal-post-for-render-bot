@@ -878,10 +878,7 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", templa
       delivery_prefix="FREE delivery",
       delivery_date=f"Tomorrow, {del_date}"
     )
-
-    
-
-    else:
+  else:
         # Standard Layout Rendering
         aspect = orig_w / orig_h if orig_h > 0 else 1
         is_landscape = aspect > 1.3
