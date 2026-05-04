@@ -12,6 +12,8 @@ import json
 import logging
 import asyncio
 import base64
+import datetime    # <--- NEW
+import random
 from io import BytesIO
 from urllib.parse import urlparse
 import fitz
@@ -497,267 +499,214 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Perfected Marketplace Price Breakdown Banner</title>
 <style>
-  /* Give WeasyPrint a generous fixed canvas, the threshold-cropper will slice off the empty bottom automatically! */
-  @page {
-    size: 1040px 1000px; 
-    margin: 0;
-  }
+    /* Generous canvas, Pillow will auto-crop the empty space perfectly */
+    @page { size: 900px 400px; margin: 0; }
+    
+    body {
+        background-color: #f7f9fa; 
+        font-family: Arial, sans-serif; 
+        margin: 0;
+        padding: 30px;
+        -webkit-font-smoothing: antialiased;
+    }
 
-  /* Base Variables */
-  :root {
-    --bg-color: {{ bg_color }};
-    --theme-color: {{ theme_color }};
-    --tag-color: {{ tag_color }};
-    --text-white: #ffffff;
-  }
+    /* WeasyPrint Safe Table Layout */
+    .product-card {
+        display: table;
+        width: 850px;
+        background-color: transparent;
+        color: #0f1111;
+    }
 
-  * {
-    box-sizing: border-box;
-    margin: 0;
-    padding: 0;
-  }
+    /* Left Column: Image & Badge */
+    .image-col {
+        display: table-cell;
+        vertical-align: middle;
+        width: 220px;
+        height: 220px;
+        padding-right: 30px;
+    }
 
-  body {
-    font-family: "Amazon Ember", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    /* Pure white background allows the Pillow cropper to cut the edges flawlessly */
-    background-color: #ffffff; 
-    padding: 30px;
-  }
+    .image-wrapper {
+        position: relative;
+        width: 220px;
+        height: 220px;
+        text-align: center;
+    }
 
-  /* --- Main Theme Banner --- */
-  .banner-container {
-    background-color: var(--bg-color);
-    background-image: repeating-linear-gradient(
-      45deg,
-      rgba(0, 0, 0, 0.02) 0px,
-      rgba(0, 0, 0, 0.02) 2px,
-      transparent 2px,
-      transparent 8px
-    );
-    padding: 35px;
-    width: 980px; 
-    overflow: hidden; /* Clears internal floats */
-    border: 1px solid #e0e0e0;
-  }
+    .image-wrapper img {
+        max-width: 220px;
+        max-height: 220px;
+        object-fit: contain;
+    }
 
-  /* --- LEFT COLUMN: Product Image Box --- */
-  .col-left {
-    float: left;
-    width: 410px;
-    background-color: #ffffff;
-    height: 480px; /* Fixed height forces absolute structure */
-    position: relative; 
-    border-radius: 4px;
-  }
+    /* The blue checkmark badge */
+    .selection-badge {
+        position: absolute;
+        top: 5px;
+        left: -10px;
+        width: 30px;
+        height: 30px;
+        background-color: #1f64a5;
+        border-radius: 5px;
+        text-align: center;
+        z-index: 2;
+    }
 
-  .col-left img {
-    max-width: 370px;
-    max-height: 440px;
-    position: absolute;
-    top: 0; bottom: 0; left: 0; right: 0;
-    margin: auto; /* Perfect internal centering */
-  }
+    .selection-badge svg {
+        width: 18px;
+        height: 18px;
+        stroke: #ffffff;
+        stroke-width: 3.5;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        fill: none;
+        margin-top: 6px;
+    }
 
-  /* --- RIGHT COLUMN: Info Structure --- */
-  .col-right {
-    float: right;
-    width: 470px;
-  }
+    /* Right Column: Product Details */
+    .details-col {
+        display: table-cell;
+        vertical-align: middle;
+        width: 600px;
+    }
 
-  /* Shared Theme Box Styling */
-  .theme-box {
-    background-color: var(--theme-color);
-    color: var(--text-white);
-    border-radius: 4px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  }
+    .product-title {
+        font-size: 26px;
+        font-weight: 400;
+        margin: 0 0 8px 0;
+        line-height: 1.3;
+    }
 
-  /* 1. MARKETPLACE Header Box */
-  .header-wrapper {
-    text-align: center;
-    margin-bottom: 16px;
-  }
-  .marketplace-box {
-    display: inline-block;
-    width: 300px;
-    padding: 12px 10px; /* Reduced side padding slightly to fit the logo comfortably */
-    position: relative;
-    text-align: center;
-  }
+    .bought-stats {
+        font-size: 22px;
+        color: #0f1111;
+        margin: 0 0 16px 0;
+    }
 
-  /* Beautifully aligning the Logo and Text */
-  .mkt-logo {
-    width: 28px;
-    height: 28px;
-    vertical-align: middle;
-    margin-right: 10px;
-    border-radius: 4px; /* Optional: gives the square icons a soft edge */
-  }
-  .mkt-text {
-    font-size: 28px;
-    font-weight: 700;
-    letter-spacing: 0.5px;
-    vertical-align: middle;
-  }
+    .deal-tag {
+        color: #cc0c39;
+        font-size: 24px;
+        font-weight: 700;
+        margin: 0 0 12px 0;
+    }
 
-  /* Custom Inline SVG for the Discount Tag (%) */
-  .discount-tag {
-    position: absolute;
-    top: -18px;
-    right: -28px;
-    width: 58px;
-    height: 58px;
-    z-index: 10;
-  }
+    /* Pricing Area - Floats for perfect WeasyPrint Alignment */
+    .pricing-row {
+        overflow: hidden; /* Clears the floats */
+        margin-bottom: 25px;
+        padding-top: 5px;
+    }
 
-  /* 2. PRODUCT TITLE Box */
-  .title-box {
-    text-align: center;
-    padding: 16px 20px;
-    font-size: 20px;
-    font-weight: 600;
-    line-height: 1.4;
-    margin-bottom: 16px;
-  }
+    .discount-box {
+        float: left;
+        background-color: #cc0c39;
+        color: #ffffff;
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 26px;
+        font-weight: 400;
+        margin-right: 15px;
+    }
 
-  /* 3. Regular Price Box */
-  .price-box {
-    text-align: center;
-    padding: 14px 20px;
-    font-size: 19px;
-    font-weight: 500;
-    margin-bottom: 16px;
-  }
+    .currency-sym {
+        float: left;
+        font-size: 22px;
+        font-weight: 500;
+        margin-top: 4px;
+        margin-right: 2px;
+        color: #0f1111;
+    }
 
-  /* 4. Checkout Price Breakdown Box */
-  .breakdown-box {
-    padding: 24px 35px;
-    min-height: 180px;
-  }
+    .price-main {
+        float: left;
+        font-size: 40px;
+        font-weight: 700;
+        line-height: 1;
+        color: #0f1111;
+    }
 
-  /* Floats mimic flex-between flawlessly in WeasyPrint */
-  .breakdown-row {
-    width: 100%;
-    font-size: 22px;
-    margin-bottom: 12px;
-    letter-spacing: 0.3px;
-    overflow: hidden; 
-  }
-  .breakdown-row span:first-child {
-    float: left;
-    font-weight: 500;
-  }
-  .breakdown-row span:last-child {
-    float: right;
-    font-weight: 400; 
-  }
+    .price-cents {
+        float: left;
+        font-size: 18px;
+        font-weight: 700;
+        margin-top: 2px;
+        margin-right: 15px;
+        color: #0f1111;
+    }
 
-  .savings-row {
-    color: #a3e6a3; 
-  }
+    .mrp {
+        float: left;
+        font-size: 22px;
+        color: #565959;
+        margin-top: 12px;
+    }
 
-  .divider {
-    height: 2px;
-    background-color: #ffffff;
-    margin: 18px 0;
-    clear: both;
-  }
+    .mrp-strike {
+        text-decoration: line-through;
+    }
 
-  .order-total {
-    font-size: 26px;
-    margin-bottom: 0;
-    clear: both;
-    padding-top: 5px;
-    overflow: hidden;
-  }
-  .order-total span:first-child {
-    float: left;
-    font-weight: 700;
-  }
-  .order-total span:last-child {
-    float: right;
-    font-weight: 700;
-  }
+    /* Delivery Info */
+    .delivery-info {
+        font-size: 22px;
+        color: #0f1111;
+        clear: both; /* Ensures it drops below the pricing row */
+    }
+
+    .delivery-info strong {
+        font-weight: 700;
+    }
 </style>
 </head>
 <body>
 
-<div class="banner-container">
-  
-  <!-- LEFT: Product Image Card -->
-  <div class="col-left">
-    <img src="data:image/jpeg;base64,{{ img_b64 }}" alt="product">
-  </div>
-
-  <!-- RIGHT: Pricing Information Stack -->
-  <div class="col-right">
-    
-    <!-- Header -->
-    <div class="header-wrapper">
-      <div class="theme-box marketplace-box">
+    <div class="product-card">
         
-        <!-- Render the Logo next to the text -->
-        <img src="{{ mkt_logo }}" class="mkt-logo" alt="logo">
-        <span class="mkt-text">{{ marketplace_name }}</span>
-        
-        <!-- Precision SVG Tag -->
-        {% if discount_pct > 0 %}
-        <svg class="discount-tag" viewBox="0 0 100 100">
-          <path d="M 20 5 L 85 5 L 85 85 L 20 85 L 0 45 Z" fill="var(--tag-color)" />
-          <circle cx="18" cy="45" r="6" fill="var(--bg-color)"/> 
-          <text x="52" y="56" fill="#ffffff" font-size="28" font-weight="bold" font-family="Arial, sans-serif" text-anchor="middle">{{ discount_pct }}%</text>
-        </svg>
-        {% endif %}
-      </div>
-    </div>
+        <!-- Image & Checkbox -->
+        <div class="image-col">
+            <div class="image-wrapper">
+                <div class="selection-badge">
+                    <svg viewBox="0 0 24 24">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                </div>
+                <img src="data:image/jpeg;base64,{{ img_b64 }}" alt="Product Image">
+            </div>
+        </div>
 
-    <!-- Title -->
-    <div class="theme-box title-box">
-      {{ product_title }}
-    </div>
+        <!-- Details -->
+        <div class="details-col">
+            <h2 class="product-title">{{ title }}</h2>
+            
+            <div class="bought-stats">{{ bought_stats }}</div>
+            
+            <div class="deal-tag">Limited time deal</div>
 
-    <!-- Retail Price (Only rendered if >= 20% diff) -->
-    {% if show_regular_price %}
-    <div class="theme-box price-box">
-      Regular Price: &#8377;{{ regular_price_fmt }} ({{ regular_discount_pct }}% OFF)
-    </div>
-    {% endif %}
+            <div class="pricing-row">
+                {% if percent_off %}
+                <div class="discount-box">{{ percent_off }}</div>
+                {% endif %}
+                
+                <div class="currency-sym">₹</div>
+                <div class="price-main">{{ current_price }}</div>
+                <div class="price-cents">{{ price_cents }}</div>
+                
+                {% if mrp %}
+                <div class="mrp">M.R.P.: <span class="mrp-strike">₹{{ mrp }}</span></div>
+                {% endif %}
+            </div>
 
-    <!-- Breakdown Bottom Block -->
-    <div class="theme-box breakdown-box">
-      <div class="breakdown-row">
-        <span>Items:</span>
-        <span>&#8377;{{ price_fmt }}</span>
-      </div>
-      <div class="breakdown-row">
-        <span>Delivery:</span>
-        <span>&#8377;0.00</span>
-      </div>
-      
-      {% for saving in savings %}
-      <div class="breakdown-row savings-row">
-        <span>{{ saving.label }}:</span>
-        <span>&minus;&#8377;{{ saving.value }}</span>
-      </div>
-      {% endfor %}
-      
-      <div class="divider"></div>
-      
-      <div class="order-total">
-        <span>Order Total:</span>
-        <span>&#8377;{{ effective_fmt }}</span>
-      </div>
-    </div>
+            <div class="delivery-info">
+                {{ delivery_prefix }} <strong>{{ delivery_date }}</strong>
+            </div>
+        </div>
 
-  </div>
-</div>
+    </div>
 
 </body>
 </html>"""
 )
-
 
 AMAZON_DEAL_TEMPLATE = Template(
     """<!DOCTYPE html>
@@ -898,45 +847,41 @@ def _download_image_b64(url):
 def _fmt(n):
     return f"{int(n):,}" if n else "0"
 
-def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", template_type="standard", short_title="", reg_price=0):
-    img_b64, orig_w, orig_h = _download_image_b64(image_url)
-
-    if template_type == "optimized":
+def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", template_tyif template_type == "optimized":
         effective = bd["effective"]
         show_reg = reg_price >= (bd["price"] * 1.20)
         
-        if show_reg:
-            reg_pct = int(((reg_price - effective) / reg_price) * 100)
-            tag_pct = reg_pct
-        else:
-            mrp = bd.get("mrp", 0)
-            tag_pct = int(((mrp - effective) / mrp) * 100) if mrp > effective else 0
-
-        savings =[]
-        if bd.get("coupon_disc", 0) > 0:
-            savings.append({"label": "Coupon Savings", "value": _fmt(bd["coupon_disc"])})
-        if bd.get("best_bank_disc", 0) > 0:
-            savings.append({"label": f"{bd['best_bank']} Discount", "value": _fmt(bd["best_bank_disc"])})
-
-        mkt_name = "AMAZON" if marketplace == "amazon" else "FLIPKART 🛒"
-        theme_color = "#267383" if marketplace == "amazon" else "#2874f0"
-        tag_color = "#f08800" if marketplace == "amazon" else "#f08800"
+        if template_type == "optimized":
+          effective = bd["effective"]
+          show_reg = reg_price >= (bd["price"] * 1.20)
         
-        html = OPTIMIZED_DEAL_TEMPLATE.render(
+          # Decide which MRP to use for the strikethrough
+          mrp_to_use = reg_price if show_reg else bd.get("mrp", 0)
+        
+          # Calculate discount percentage
+          tag_pct = int(((mrp_to_use - effective) / mrp_to_use) * 100) if mrp_to_use > effective else 0
+
+          # Auto-calculate "Tomorrow" delivery date (e.g., "05 May")
+          tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
+          del_date = tomorrow.strftime('%d %b')
+        
+          # Generate random realistic bought stats
+          bought_rnd = random.choice(['100+', '200+', '400+', '500+', '1K+', '2K+', '3K+'])
+          bought_stats = f"{bought_rnd} bought in past month"
+        
+          html = OPTIMIZED_DEAL_TEMPLATE.render(
             img_b64=img_b64,
-            marketplace_name=mkt_name,
-            theme_color=theme_color,
-            tag_color=tag_color,
-            bg_color="#fcd528",
-            product_title=short_title or "Product Deal",
-            show_regular_price=show_reg,
-            regular_price_fmt=_fmt(reg_price),
-            regular_discount_pct=reg_pct if show_reg else 0,
-            discount_pct=tag_pct,
-            price_fmt=_fmt(bd["price"]),
-            savings=savings,
-            effective_fmt=_fmt(effective)
+            title=short_title or "Product Deal",
+            bought_stats=bought_stats,
+            percent_off=f"-{tag_pct}%" if tag_pct > 0 else "",
+            current_price=_fmt(effective),
+            price_cents="00",
+            mrp=_fmt(mrp_to_use) if mrp_to_use > effective else "",
+            delivery_prefix="FREE delivery",
+            delivery_date=f"Tomorrow, {del_date}"
         )
+
+    
 
     else:
         # Standard Layout Rendering
