@@ -980,8 +980,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         image_url = details.get("image", "")
         price = scraped.get("current_price") or details.get("price") or 0
         if not price and thunder.get("avg"): price = int(thunder["avg"])
-        mrp = scraped.get("mrp") or details.get("mrp") or price
-        if mrp < price: mrp = price
+        
+        # Safely extract MRPs from both sources
+        try:
+            api_mrp = int(details.get("mrp") or 0)
+        except (ValueError, TypeError):
+            api_mrp = 0
+            
+        try:
+            scraped_mrp = int(scraped.get("mrp") or 0)
+        except (ValueError, TypeError):
+            scraped_mrp = 0
+            
+        # The true MRP is always the highest valid number we found from ANY source
+        mrp = max(scraped_mrp, api_mrp, price)
+        
         avg_p = thunder.get("avg", 0)
 
         bd = calc_breakdown(price, mrp, scraped.get("coupon"), scraped.get("bank_offers",[]))
