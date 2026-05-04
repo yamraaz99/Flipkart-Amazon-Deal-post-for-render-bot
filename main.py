@@ -493,7 +493,6 @@ def calc_breakdown(price, mrp, coupon, bank_offers):
 # ────────────────────────────────────────────────────────────────────
 # 7. HTML TEMPLATES (Standard & Optimized)
 # ────────────────────────────────────────────────────────────────────
-
 OPTIMIZED_DEAL_TEMPLATE = Template(
     """<!DOCTYPE html>
 <html lang="en">
@@ -501,86 +500,56 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
 <meta charset="UTF-8">
 <style>
     /* Generous canvas, Pillow will auto-crop the empty space perfectly */
-    @page { size: 900px 400px; margin: 0; }
+    @page { size: 900px 420px; margin: 0; }
     
     body {
         background-color: #f7f9fa; 
         font-family: Arial, sans-serif; 
         margin: 0;
-        padding: 30px;
+        padding: 35px;
         -webkit-font-smoothing: antialiased;
     }
 
     /* WeasyPrint Safe Table Layout */
     .product-card {
         display: table;
-        width: 850px;
+        width: 830px;
         background-color: transparent;
         color: #0f1111;
     }
 
-    /* Left Column: Image & Badge */
+    /* Left Column: Image */
     .image-col {
         display: table-cell;
         vertical-align: middle;
-        width: 220px;
-        height: 220px;
-        padding-right: 30px;
-    }
-
-    .image-wrapper {
-        position: relative;
-        width: 220px;
-        height: 220px;
+        width: 250px;
+        padding-right: 35px;
         text-align: center;
     }
 
     .image-wrapper img {
-        max-width: 220px;
-        max-height: 220px;
+        max-width: 240px;
+        max-height: 240px;
         object-fit: contain;
-    }
-
-    /* The blue checkmark badge */
-    .selection-badge {
-        position: absolute;
-        top: 5px;
-        left: -10px;
-        width: 30px;
-        height: 30px;
-        background-color: #1f64a5;
-        border-radius: 5px;
-        text-align: center;
-        z-index: 2;
-    }
-
-    .selection-badge svg {
-        width: 18px;
-        height: 18px;
-        stroke: #ffffff;
-        stroke-width: 3.5;
-        stroke-linecap: round;
-        stroke-linejoin: round;
-        fill: none;
-        margin-top: 6px;
     }
 
     /* Right Column: Product Details */
     .details-col {
         display: table-cell;
         vertical-align: middle;
-        width: 600px;
+        width: 580px;
     }
 
     .product-title {
-        font-size: 26px;
+        font-size: 28px;
         font-weight: 400;
-        margin: 0 0 8px 0;
-        line-height: 1.3;
+        margin: 0 0 12px 0;
+        line-height: 1.35;
+        color: #0f1111;
     }
 
     .bought-stats {
-        font-size: 22px;
+        font-size: 24px;
         color: #0f1111;
         margin: 0 0 16px 0;
     }
@@ -589,58 +558,62 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
         color: #cc0c39;
         font-size: 24px;
         font-weight: 700;
-        margin: 0 0 12px 0;
+        margin: 0 0 15px 0;
     }
 
-    /* Pricing Area - Floats for perfect WeasyPrint Alignment */
+    /* Pricing Area - Inline Blocks for perfect vertical alignment */
     .pricing-row {
-        overflow: hidden; /* Clears the floats */
-        margin-bottom: 25px;
-        padding-top: 5px;
+        margin-bottom: 8px; /* Creates the gap between Price and MRP */
     }
 
     .discount-box {
-        float: left;
+        display: inline-block;
         background-color: #cc0c39;
         color: #ffffff;
-        padding: 6px 12px;
+        padding: 8px 14px;
         border-radius: 6px;
-        font-size: 26px;
+        font-size: 32px;
         font-weight: 400;
+        vertical-align: middle;
         margin-right: 15px;
+    }
+
+    .price-block {
+        display: inline-block;
+        vertical-align: middle;
     }
 
     .currency-sym {
-        float: left;
-        font-size: 22px;
+        display: inline-block;
+        font-size: 24px;
         font-weight: 500;
-        margin-top: 4px;
+        vertical-align: top;
+        margin-top: 6px;
         margin-right: 2px;
-        color: #0f1111;
     }
 
     .price-main {
-        float: left;
-        font-size: 40px;
+        display: inline-block;
+        font-size: 52px;
         font-weight: 700;
         line-height: 1;
-        color: #0f1111;
+        vertical-align: middle;
+        letter-spacing: -1px;
     }
 
     .price-cents {
-        float: left;
-        font-size: 18px;
+        display: inline-block;
+        font-size: 20px;
         font-weight: 700;
-        margin-top: 2px;
-        margin-right: 15px;
-        color: #0f1111;
+        vertical-align: top;
+        margin-top: 4px;
     }
 
-    .mrp {
-        float: left;
-        font-size: 22px;
+    /* MRP is now a completely separate block that forces itself below the price */
+    .mrp-row {
+        font-size: 24px;
         color: #565959;
-        margin-top: 12px;
+        margin-bottom: 25px;
     }
 
     .mrp-strike {
@@ -651,7 +624,6 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
     .delivery-info {
         font-size: 22px;
         color: #0f1111;
-        clear: both; /* Ensures it drops below the pricing row */
     }
 
     .delivery-info strong {
@@ -663,14 +635,9 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
 
     <div class="product-card">
         
-        <!-- Image & Checkbox -->
+        <!-- Image Only (No Blue Tick) -->
         <div class="image-col">
             <div class="image-wrapper">
-                <div class="selection-badge">
-                    <svg viewBox="0 0 24 24">
-                        <polyline points="20 6 9 17 4 12"></polyline>
-                    </svg>
-                </div>
                 <img src="data:image/jpeg;base64,{{ img_b64 }}" alt="Product Image">
             </div>
         </div>
@@ -688,14 +655,14 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
                 <div class="discount-box">{{ percent_off }}</div>
                 {% endif %}
                 
-                <div class="currency-sym">₹</div>
-                <div class="price-main">{{ current_price }}</div>
-                <div class="price-cents">{{ price_cents }}</div>
-                
-                {% if mrp %}
-                <div class="mrp">M.R.P.: <span class="mrp-strike">₹{{ mrp }}</span></div>
-                {% endif %}
+                <div class="price-block">
+                    <span class="currency-sym">₹</span><span class="price-main">{{ current_price }}</span><span class="price-cents">{{ price_cents }}</span>
+                </div>
             </div>
+            
+            {% if mrp %}
+            <div class="mrp-row">M.R.P.: <span class="mrp-strike">₹{{ mrp }}</span></div>
+            {% endif %}
 
             <div class="delivery-info">
                 {{ delivery_prefix }} <strong>{{ delivery_date }}</strong>
@@ -707,6 +674,7 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
 </body>
 </html>"""
 )
+
 
 AMAZON_DEAL_TEMPLATE = Template(
     """<!DOCTYPE html>
