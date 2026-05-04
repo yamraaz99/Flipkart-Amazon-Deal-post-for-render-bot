@@ -819,13 +819,9 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", templa
 
     if template_type == "optimized":
         effective = bd["effective"]
-        show_reg = reg_price >= (bd["price"] * 1.20)
-        
-        # Decide which MRP to use for the strikethrough
-        mrp_to_use = reg_price if show_reg else bd.get("mrp", 0)
-        
+        real_mrp = bd.get("mrp", effective)
         # Calculate discount percentage
-        tag_pct = int(((mrp_to_use - effective) / mrp_to_use) * 100) if mrp_to_use > effective else 0
+        tag_pct = int(((real_mrp - effective) / real_mrp) * 100) if real_mrp > effective else 0
 
         # Auto-calculate "Tomorrow" delivery date (e.g., "05 May")
         tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
@@ -842,7 +838,7 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", templa
             percent_off=f"-{tag_pct}%" if tag_pct > 0 else "",
             current_price=_fmt(effective),
             price_cents="00",
-            mrp=_fmt(mrp_to_use) if mrp_to_use > effective else "",
+            mrp=_fmt(real_mrp) if real_mrp > effective else "",
             delivery_prefix="FREE delivery",
             delivery_date=f"Tomorrow, {del_date}"
         )
