@@ -847,9 +847,8 @@ def _download_image_b64(url):
 def _fmt(n):
     return f"{int(n):,}" if n else "0"
 
-def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", template_tyif template_type == "optimized":
-        effective = bd["effective"]
-        show_reg = reg_price >= (bd["price"] * 1.20)
+def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", template_type="standard", short_title="", reg_price=0):
+    img_b64, orig_w, orig_h = _download_image_b64(image_url)
         
         if template_type == "optimized":
           effective = bd["effective"]
