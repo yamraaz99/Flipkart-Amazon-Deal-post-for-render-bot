@@ -51,7 +51,7 @@ EXT_ID = "7242722"
 EXT_AUTH = "788970602"
 
 logging.basicConfig(
-    format="%(asctime)s[%(levelname)s] %(message)s",
+    format="%(asctime)s [%(levelname)s] %(message)s",
     level=logging.INFO,
 )
 log = logging.getLogger(__name__)
@@ -244,6 +244,18 @@ async def get_historical_regular_price(pid, pos):
     except Exception as e:
         log.error(f"Error fetching regular price: {e}")
     return 0
+
+
+# Added the exact productData API endpoint provided by the user
+async def api_product_data(pid, pos):
+    try:
+        async with httpx.AsyncClient(timeout=10) as c:
+            r = await c.get(f"https://buyhatke.com/api/productData?pos={pos}&pid={pid}")
+            d = r.json()
+            return d.get("data", {}) if d.get("status") == 1 else {}
+    except Exception as e:
+        log.error(f"api_product_data: {e}")
+        return {}
 
 
 # ────────────────────────────────────────────────────────────────────
@@ -958,20 +970,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         product_url = make_clean_url(mkt, pid, resolved)
         await status.edit_text("📦 Fetching data...")
 
-        # Phase 1: parallel API calls (including the New Historical API)
-        details, thunder, compare, reg_price = await asyncio.gather(
+        # Phase 1: parallel API calls (Now includes api_product_data)
+        details, thunder, compare, reg_price, prod_data = await asyncio.gather(
             api_product_details(resolved),
             api_thunder(pid, pos),
             api_compare(pid, pos),
             get_historical_regular_price(pid, pos),
+            api_product_data(pid, pos),
             return_exceptions=True,
         )
         if isinstance(details, Exception): details = {}
         if isinstance(thunder, Exception): thunder = {}
         if isinstance(compare, Exception): compare =[]
         if isinstance(reg_price, Exception): reg_price = 0
+        if isinstance(prod_data, Exception): prod_data = {}
 
-        raw_title = details.get("prod") or details.get("title") or "Product"
+        # Fallback raw_title checks the new prod_data first
+        raw_title = prod_data.get("name") or details.get("prod") or details.get("title") or "Product"
         await status.edit_text("🔍 Scraping & preparing...")
 
         # Phase 2: parallel scrape + title shorten
@@ -988,14 +1003,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             short_title = raw_title
 
         scraped = scraped_result
-        image_url = details.get("image", "")
+        image_url = prod_data.get("image") or details.get("image") or ""
         
-        # Fixed: using _clean_price to prevent string-with-comma ValueError
-        price = scraped.get("current_price") or _clean_price(details.get("price")) or 0
+        # Pulls from scraped -> prod_data -> details 
+        price = (
+            scraped.get("current_price") 
+            or _clean_price(prod_data.get("cur_price")) 
+            or _clean_price(details.get("price")) 
+            or 0
+        )
         if not price and thunder.get("avg"): price = int(thunder["avg"])
         
-        # Safely extract MRPs from both sources stripping commas
-        api_mrp = _clean_price(details.get("mrp")) or 0
+        # Safely extracts MRP checking both api endpoints and keys
+        api_mrp = (
+            _clean_price(prod_data.get("mrpFloat")) 
+            or _clean_price(details.get("mrp")) 
+            or _clean_price(details.get("mrpFloat")) 
+            or 0
+        )
         scraped_mrp = _clean_price(scraped.get("mrp")) or 0
             
         # The true MRP is always the highest valid number we found from ANY source
