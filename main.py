@@ -829,7 +829,6 @@ body{ font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,A
 </html>"""
 )
 
-
 # ────────────────────────────────────────────────────────────────────
 # 8. IMAGE GENERATION
 # ────────────────────────────────────────────────────────────────────
@@ -848,37 +847,39 @@ def _fmt(n):
     return f"{int(n):,}" if n else "0"
 
 def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", template_type="standard", short_title="", reg_price=0):
-  img_b64, orig_w, orig_h = _download_image_b64(image_url)
-  if template_type == "optimized":
-    effective = bd["effective"]
-    show_reg = reg_price >= (bd["price"] * 1.20)
-        
-    # Decide which MRP to use for the strikethrough
-    mrp_to_use = reg_price if show_reg else bd.get("mrp", 0)
-        
-    # Calculate discount percentage
-    tag_pct = int(((mrp_to_use - effective) / mrp_to_use) * 100) if mrp_to_use > effective else 0
+    img_b64, orig_w, orig_h = _download_image_b64(image_url)
 
-    # Auto-calculate "Tomorrow" delivery date (e.g., "05 May")
-    tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
-    del_date = tomorrow.strftime('%d %b')
+    if template_type == "optimized":
+        effective = bd["effective"]
+        show_reg = reg_price >= (bd["price"] * 1.20)
         
-    # Generate random realistic bought stats
-    bought_rnd = random.choice(['100+', '200+', '400+', '500+', '1K+', '2K+', '3K+'])
-    bought_stats = f"{bought_rnd} bought in past month"
+        # Decide which MRP to use for the strikethrough
+        mrp_to_use = reg_price if show_reg else bd.get("mrp", 0)
         
-    html = OPTIMIZED_DEAL_TEMPLATE.render(
-      img_b64=img_b64,
-      title=short_title or "Product Deal",
-      bought_stats=bought_stats,
-      percent_off=f"-{tag_pct}%" if tag_pct > 0 else "",
-      current_price=_fmt(effective),
-      price_cents="00",
-      mrp=_fmt(mrp_to_use) if mrp_to_use > effective else "",
-      delivery_prefix="FREE delivery",
-      delivery_date=f"Tomorrow, {del_date}"
-    )
-  else:
+        # Calculate discount percentage
+        tag_pct = int(((mrp_to_use - effective) / mrp_to_use) * 100) if mrp_to_use > effective else 0
+
+        # Auto-calculate "Tomorrow" delivery date (e.g., "05 May")
+        tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
+        del_date = tomorrow.strftime('%d %b')
+        
+        # Generate random realistic bought stats
+        bought_rnd = random.choice(['100+', '200+', '400+', '500+', '1K+', '2K+', '3K+'])
+        bought_stats = f"{bought_rnd} bought in past month"
+        
+        html = OPTIMIZED_DEAL_TEMPLATE.render(
+            img_b64=img_b64,
+            title=short_title or "Product Deal",
+            bought_stats=bought_stats,
+            percent_off=f"-{tag_pct}%" if tag_pct > 0 else "",
+            current_price=_fmt(effective),
+            price_cents="00",
+            mrp=_fmt(mrp_to_use) if mrp_to_use > effective else "",
+            delivery_prefix="FREE delivery",
+            delivery_date=f"Tomorrow, {del_date}"
+        )
+
+    else:
         # Standard Layout Rendering
         aspect = orig_w / orig_h if orig_h > 0 else 1
         is_landscape = aspect > 1.3
