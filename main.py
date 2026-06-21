@@ -505,24 +505,29 @@ def calc_breakdown(price, mrp, coupon, bank_offers):
 # ────────────────────────────────────────────────────────────────────
 # 7. HTML TEMPLATES (Standard & Optimized)
 # ────────────────────────────────────────────────────────────────────
+from jinja2 import Template
+
 OPTIMIZED_DEAL_TEMPLATE = Template(
     """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <style>
+    /* Import official Amazon Ember web font for 100% accuracy */
+    @import url('https://fonts.cdnfonts.com/css/amazon-ember');
+
     /* Generous canvas, Pillow will auto-crop the empty space perfectly */
     @page { size: 900px 420px; margin: 0; }
     
     body {
         background-color: #f7f9fa; 
-        font-family: Arial, sans-serif; 
+        font-family: "Amazon Ember", Arial, sans-serif; 
         margin: 0;
         padding: 35px;
         -webkit-font-smoothing: antialiased;
     }
 
-    /* WeasyPrint Safe Table Layout */
+    /* Table Layout */
     .product-card {
         display: table;
         width: 830px;
@@ -539,6 +544,11 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
         text-align: center;
     }
 
+    .image-wrapper {
+        display: inline-block;
+        line-height: 0; 
+    }
+
     .image-wrapper img {
         max-width: 240px;
         max-height: 240px;
@@ -552,42 +562,48 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
         width: 580px;
     }
 
+    /* Amazon Title Truncation (Max 2 lines + Ellipsis) */
     .product-title {
-        font-size: 28px;
+        font-size: 26px;
         font-weight: 400;
-        margin: 0 0 12px 0;
-        line-height: 1.35;
+        margin: 0 0 10px 0;
+        line-height: 1.4;
         color: #0f1111;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
 
     .bought-stats {
-        font-size: 24px;
+        font-size: 22px;
         color: #0f1111;
-        margin: 0 0 16px 0;
+        margin: 0 0 14px 0;
     }
 
     .deal-tag {
         color: #cc0c39;
-        font-size: 24px;
+        font-size: 22px;
         font-weight: 700;
-        margin: 0 0 15px 0;
+        margin: 0 0 14px 0;
     }
 
-    /* Pricing Area - Inline Blocks for perfect vertical alignment */
+    /* Pricing Area */
     .pricing-row {
-        margin-bottom: 8px; /* Creates the gap between Price and MRP */
+        margin-bottom: 6px; 
     }
 
     .discount-box {
         display: inline-block;
         background-color: #cc0c39;
         color: #ffffff;
-        padding: 8px 14px;
-        border-radius: 6px;
-        font-size: 32px;
+        padding: 6px 12px;
+        border-radius: 4px;
+        font-size: 28px;
         font-weight: 400;
         vertical-align: middle;
-        margin-right: 15px;
+        margin-right: 12px;
     }
 
     .price-block {
@@ -597,20 +613,21 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
 
     .currency-sym {
         display: inline-block;
-        font-size: 24px;
+        font-size: 22px;
         font-weight: 500;
         vertical-align: top;
-        margin-top: 6px;
-        margin-right: 2px;
+        position: relative;
+        top: 6px;
+        margin-right: 1px;
     }
 
     .price-main {
         display: inline-block;
-        font-size: 52px;
+        font-size: 54px;
         font-weight: 700;
         line-height: 1;
         vertical-align: middle;
-        letter-spacing: -1px;
+        letter-spacing: -1.5px;
     }
 
     .price-cents {
@@ -618,18 +635,64 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
         font-size: 20px;
         font-weight: 700;
         vertical-align: top;
-        margin-top: 4px;
+        position: relative;
+        top: 6px;
     }
 
-    /* MRP is now a completely separate block that forces itself below the price */
+    /* MRP */
     .mrp-row {
-        font-size: 24px;
+        font-size: 22px;
         color: #565959;
-        margin-bottom: 25px;
+        margin-bottom: 15px;
     }
 
     .mrp-strike {
         text-decoration: line-through;
+    }
+
+    /* Prime and Today Badge Row */
+    .prime-row {
+        margin-bottom: 10px;
+    }
+
+    .prime-logo-wrapper {
+        display: inline-block;
+        vertical-align: middle;
+    }
+
+    .prime-tick {
+        display: inline-block;
+        vertical-align: middle;
+        margin-right: 1px;
+    }
+
+    .prime-text {
+        display: inline-block;
+        vertical-align: middle;
+        color: #00a8e1;
+        font-weight: 700;
+        font-size: 28px;
+        letter-spacing: -0.8px;
+    }
+
+    /* Replicated Amazon's Slanted Parallelogram Badge */
+    .today-badge {
+        display: inline-block;
+        vertical-align: middle;
+        background-color: #1ea0f5;
+        color: #ffffff;
+        font-size: 20px;
+        font-weight: 700;
+        padding: 2px 12px;
+        border-radius: 3px;
+        margin-left: 12px;
+        transform: skewX(-12deg);
+    }
+    
+    /* Un-skew the text inside the slanted badge */
+    .today-badge span {
+        display: inline-block;
+        transform: skewX(12deg);
     }
 
     /* Delivery Info */
@@ -647,7 +710,7 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
 
     <div class="product-card">
         
-        <!-- Image Only (No Blue Tick) -->
+        <!-- Image Only -->
         <div class="image-col">
             <div class="image-wrapper">
                 <img src="data:image/jpeg;base64,{{ img_b64 }}" alt="Product Image">
@@ -656,6 +719,7 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
 
         <!-- Details -->
         <div class="details-col">
+            <!-- Clamp text allows long titles to perfectly trail off into '...' -->
             <h2 class="product-title">{{ title }}</h2>
             
             <div class="bought-stats">{{ bought_stats }}</div>
@@ -675,6 +739,20 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
             {% if mrp %}
             <div class="mrp-row">M.R.P.: <span class="mrp-strike">₹{{ mrp }}</span></div>
             {% endif %}
+
+            <!-- Highly Accurate Prime Element + Authentic Slanted 'Today' Badge -->
+            <div class="prime-row">
+                <div class="prime-logo-wrapper">
+                    <!-- Exact Amazon Orange & Stroke Dimensions -->
+                    <svg class="prime-tick" width="24" height="20" viewBox="0 0 24 20" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2.5 11.5 L8 17 L21.5 3" stroke="#FF9900" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <span class="prime-text">prime</span>
+                </div>
+                <div class="today-badge">
+                    <span>Today</span>
+                </div>
+            </div>
 
             <div class="delivery-info">
                 {{ delivery_prefix }} <strong>{{ delivery_date }}</strong>
