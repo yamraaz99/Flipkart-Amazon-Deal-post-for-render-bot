@@ -505,7 +505,6 @@ def calc_breakdown(price, mrp, coupon, bank_offers):
 # ────────────────────────────────────────────────────────────────────
 # 7. HTML TEMPLATES (Standard & Optimized)
 # ────────────────────────────────────────────────────────────────────
-from jinja2 import Template
 
 OPTIMIZED_DEAL_TEMPLATE = Template(
     """<!DOCTYPE html>
@@ -513,21 +512,18 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
 <head>
 <meta charset="UTF-8">
 <style>
-    /* Import official Amazon Ember web font for 100% accuracy */
-    @import url('https://fonts.cdnfonts.com/css/amazon-ember');
-
     /* Generous canvas, Pillow will auto-crop the empty space perfectly */
     @page { size: 900px 420px; margin: 0; }
     
     body {
         background-color: #f7f9fa; 
-        font-family: "Amazon Ember", Arial, sans-serif; 
+        font-family: Arial, sans-serif; 
         margin: 0;
         padding: 35px;
         -webkit-font-smoothing: antialiased;
     }
 
-    /* Table Layout */
+    /* WeasyPrint Safe Table Layout */
     .product-card {
         display: table;
         width: 830px;
@@ -546,7 +542,7 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
 
     .image-wrapper {
         display: inline-block;
-        line-height: 0; 
+        line-height: 0; /* Removes ghost spacing below the image */
     }
 
     .image-wrapper img {
@@ -562,48 +558,42 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
         width: 580px;
     }
 
-    /* Amazon Title Truncation (Max 2 lines + Ellipsis) */
     .product-title {
-        font-size: 26px;
+        font-size: 28px;
         font-weight: 400;
-        margin: 0 0 10px 0;
-        line-height: 1.4;
+        margin: 0 0 12px 0;
+        line-height: 1.35;
         color: #0f1111;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        overflow: hidden;
-        text-overflow: ellipsis;
     }
 
     .bought-stats {
-        font-size: 22px;
+        font-size: 24px;
         color: #0f1111;
-        margin: 0 0 14px 0;
+        margin: 0 0 16px 0;
     }
 
     .deal-tag {
         color: #cc0c39;
-        font-size: 22px;
+        font-size: 24px;
         font-weight: 700;
-        margin: 0 0 14px 0;
+        margin: 0 0 15px 0;
     }
 
-    /* Pricing Area */
+    /* Pricing Area - Inline Blocks for perfect vertical alignment */
     .pricing-row {
-        margin-bottom: 6px; 
+        margin-bottom: 8px; /* Creates the gap between Price and MRP */
     }
 
     .discount-box {
         display: inline-block;
         background-color: #cc0c39;
         color: #ffffff;
-        padding: 6px 12px;
-        border-radius: 4px;
-        font-size: 28px;
+        padding: 8px 14px;
+        border-radius: 6px;
+        font-size: 32px;
         font-weight: 400;
         vertical-align: middle;
-        margin-right: 12px;
+        margin-right: 15px;
     }
 
     .price-block {
@@ -613,21 +603,20 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
 
     .currency-sym {
         display: inline-block;
-        font-size: 22px;
+        font-size: 24px;
         font-weight: 500;
         vertical-align: top;
-        position: relative;
-        top: 6px;
-        margin-right: 1px;
+        margin-top: 6px;
+        margin-right: 2px;
     }
 
     .price-main {
         display: inline-block;
-        font-size: 54px;
+        font-size: 52px;
         font-weight: 700;
         line-height: 1;
         vertical-align: middle;
-        letter-spacing: -1.5px;
+        letter-spacing: -1px;
     }
 
     .price-cents {
@@ -635,15 +624,14 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
         font-size: 20px;
         font-weight: 700;
         vertical-align: top;
-        position: relative;
-        top: 6px;
+        margin-top: 4px;
     }
 
     /* MRP */
     .mrp-row {
-        font-size: 22px;
+        font-size: 24px;
         color: #565959;
-        margin-bottom: 15px;
+        margin-bottom: 12px;
     }
 
     .mrp-strike {
@@ -652,7 +640,7 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
 
     /* Prime and Today Badge Row */
     .prime-row {
-        margin-bottom: 10px;
+        margin-bottom: 12px;
     }
 
     .prime-logo-wrapper {
@@ -663,7 +651,7 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
     .prime-tick {
         display: inline-block;
         vertical-align: middle;
-        margin-right: 1px;
+        margin-right: 2px;
     }
 
     .prime-text {
@@ -671,28 +659,21 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
         vertical-align: middle;
         color: #00a8e1;
         font-weight: 700;
-        font-size: 28px;
-        letter-spacing: -0.8px;
+        font-size: 26px;
+        letter-spacing: -0.5px;
     }
 
-    /* Replicated Amazon's Slanted Parallelogram Badge */
     .today-badge {
         display: inline-block;
         vertical-align: middle;
         background-color: #1ea0f5;
         color: #ffffff;
-        font-size: 20px;
+        font-size: 22px;
         font-weight: 700;
-        padding: 2px 12px;
-        border-radius: 3px;
-        margin-left: 12px;
-        transform: skewX(-12deg);
-    }
-    
-    /* Un-skew the text inside the slanted badge */
-    .today-badge span {
-        display: inline-block;
-        transform: skewX(12deg);
+        font-style: italic;
+        padding: 3px 10px;
+        border-radius: 4px;
+        margin-left: 10px;
     }
 
     /* Delivery Info */
@@ -719,7 +700,6 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
 
         <!-- Details -->
         <div class="details-col">
-            <!-- Clamp text allows long titles to perfectly trail off into '...' -->
             <h2 class="product-title">{{ title }}</h2>
             
             <div class="bought-stats">{{ bought_stats }}</div>
@@ -740,18 +720,16 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
             <div class="mrp-row">M.R.P.: <span class="mrp-strike">₹{{ mrp }}</span></div>
             {% endif %}
 
-            <!-- Highly Accurate Prime Element + Authentic Slanted 'Today' Badge -->
+            <!-- Prime Row -->
             <div class="prime-row">
                 <div class="prime-logo-wrapper">
-                    <!-- Exact Amazon Orange & Stroke Dimensions -->
-                    <svg class="prime-tick" width="24" height="20" viewBox="0 0 24 20" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M2.5 11.5 L8 17 L21.5 3" stroke="#FF9900" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/>
+                    <!-- Amazon orange tick approximation -->
+                    <svg class="prime-tick" width="22" height="16" viewBox="0 0 24 18" fill="none" stroke="#FF9900" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="4 10 9 15 20 2"></polyline>
                     </svg>
                     <span class="prime-text">prime</span>
                 </div>
-                <div class="today-badge">
-                    <span>Today</span>
-                </div>
+                <div class="today-badge">Today</div>
             </div>
 
             <div class="delivery-info">
