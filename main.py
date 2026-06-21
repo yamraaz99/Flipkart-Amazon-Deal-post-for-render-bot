@@ -728,7 +728,7 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
                     </svg>
                     <span class="prime-text">prime</span>
                 </div>
-                <div class="today-badge">Today</div>
+                <div class="today-badge">Tomorrow</div>
             </div>
 
             <div class="delivery-info">
