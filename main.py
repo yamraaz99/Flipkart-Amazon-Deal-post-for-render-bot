@@ -874,61 +874,47 @@ body{ font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,A
 # 8. IMAGE GENERATION
 # ────────────────────────────────────────────────────────────────────
 def apply_repeating_watermark(img, text="AmazingDealsLoots"):
-    import glob  # Built-in python module to hunt for font files
+    import os
+    import urllib.request
     
     # Convert image to RGBA to support transparency
     base = img.convert("RGBA")
     txt_layer = PILImage.new("RGBA", base.size, (255, 255, 255, 0))
     
-    # Bulletproof Font Loader
-    font_size = 35
-    font = None
+    font_size = 45
+    font_path = "/tmp/Roboto-Bold.ttf"
     
-    # 1. First, try standard Linux/Render exact paths
-    common_paths = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-        "arial.ttf"
-    ]
-    
-    for path in common_paths:
+    # GUARANTEE FONT: Download Google Font directly to Render's temp folder if it doesn't exist
+    if not os.path.exists(font_path):
         try:
-            font = ImageFont.truetype(path, font_size)
-            break
-        except:
-            continue
+            urllib.request.urlretrieve(
+                "https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Bold.ttf", 
+                font_path
+            )
+        except Exception as e:
+            log.error(f"Failed to download font: {e}")
             
-    # 2. If standard paths fail, aggressively hunt the server for ANY valid font
-    if font is None:
-        try:
-            found_fonts = glob.glob("/usr/share/fonts/**/*.ttf", recursive=True)
-            if found_fonts:
-                font = ImageFont.truetype(found_fonts[0], font_size)
-        except:
-            pass
-            
-    # 3. Absolute worst-case scenario fallback
-    if font is None:
-        font = ImageFont.load_default()
-            
+    try:
+        font = ImageFont.truetype(font_path, font_size)
+    except:
+        font = ImageFont.load_default() # Worst-case fallback
+        
     # Create a stamp with increased dimensions to fit the bigger text
-    stamp = PILImage.new("RGBA", (500, 150), (255, 255, 255, 0))
+    stamp = PILImage.new("RGBA", (600, 200), (255, 255, 255, 0))
     stamp_draw = ImageDraw.Draw(stamp)
     
-    # INCREASED OPACITY: 50 out of 255 (approx 20% visibility)
-    stamp_draw.text((20, 50), text, fill=(0, 0, 0, 50), font=font)
+    # Opacity 60 out of 255 (~24% visibility) - Very visible, un-croppable
+    stamp_draw.text((20, 50), text, fill=(0, 0, 0, 60), font=font)
     
     # Rotate the stamp diagonally
-    stamp = stamp.rotate(30, expand=1)
+    stamp = stamp.rotate(35, expand=1)
     
     # Tile the stamp across the image in a staggered pattern
     w, h = base.size
     sw, sh = stamp.size
     
-    for y in range(-sh, h, sh - 40):
-        offset = (y // (sh - 40)) % 2 * (sw // 2)
+    for y in range(-sh, h, sh - 50):
+        offset = (y // (sh - 50)) % 2 * (sw // 2)
         for x in range(-sw + offset, w, sw - 20):
             txt_layer.paste(stamp, (x, y), stamp)
             
@@ -1098,6 +1084,9 @@ async def cmd_optimized(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
+  # --- NEW: Prevents crashes if someone edits a message or sends a weird update ---
+    if not msg:
+        return
     text = msg.text or msg.caption or ""
     url_m = re.search(r"(https?://[^\s]+)", text)
     if not url_m: return
