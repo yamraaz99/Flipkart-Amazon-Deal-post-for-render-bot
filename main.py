@@ -880,16 +880,15 @@ def apply_repeating_watermark(img, text="AmazingDealsLoots"):
     base = img.convert("RGBA")
     w, h = base.size
     
-    # 1. Create a massive transparent sheet to avoid cutoffs when rotating
+    # 1. Create a massive transparent sheet
     side = max(w, h) * 2
     txt_layer = PILImage.new("RGBA", (side, side), (255, 255, 255, 0))
     draw = ImageDraw.Draw(txt_layer)
     
-    # 2. Ultra-reliable font download using requests
+    # 2. Ultra-reliable font download
     font_path = "/tmp/Roboto-Bold.ttf"
     if not os.path.exists(font_path):
         try:
-            # Fetches Google's Roboto font directly from their raw Github repository
             r = requests.get("https://raw.githubusercontent.com/google/fonts/main/apache/roboto/Roboto-Bold.ttf", timeout=10)
             if r.status_code == 200:
                 with open(font_path, "wb") as f:
@@ -898,31 +897,31 @@ def apply_repeating_watermark(img, text="AmazingDealsLoots"):
             pass
             
     try:
-        # Size 45 is large, bold, and highly visible
-        font = ImageFont.truetype(font_path, 45)
+        # INCREASED FONT SIZE: 70px makes it thick, bold, and easily readable
+        font = ImageFont.truetype(font_path, 70)
     except:
         font = ImageFont.load_default()
         
-    # 3. Draw text in a grid directly over the massive sheet
-    step_x = 450  # Horizontal space between words
-    step_y = 120  # Vertical space between words
+    # 3. INCREASED SPACING: Gives the bigger text breathing room
+    step_x = 750  # Much wider horizontal gap
+    step_y = 200  # Much wider vertical gap
     
     for y in range(0, side, step_y):
-        # Stagger every other row like bricks
+        # Stagger every other row
         offset = (y // step_y) % 2 * (step_x // 2)
         for x in range(0 - offset, side, step_x):
-            # (0, 0, 0, 65) = Black text with 25% opacity
+            # Draw the text (Black, ~25% opacity)
             draw.text((x, y), text, fill=(0, 0, 0, 65), font=font)
             
-    # 4. Rotate the massive sheet by 30 degrees from the center
+    # 4. Rotate the massive sheet by 30 degrees
     txt_layer = txt_layer.rotate(30, center=(side//2, side//2))
     
-    # 5. Crop the center of the massive sheet to match our base image perfectly
+    # 5. Crop the center to match our base image perfectly
     x0 = (side - w) // 2
     y0 = (side - h) // 2
     txt_layer = txt_layer.crop((x0, y0, x0 + w, y0 + h))
     
-    # 6. Slap the sheet onto the image (Preserves 100% of the transparency)
+    # 6. Slap the sheet onto the image
     return PILImage.alpha_composite(base, txt_layer).convert("RGB")
   
 def _download_image_b64(url):
