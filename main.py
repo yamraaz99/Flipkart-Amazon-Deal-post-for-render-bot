@@ -24,7 +24,7 @@ import requests
 from bs4 import BeautifulSoup
 from keep_alive import keep_alive
 from fake_useragent import UserAgent
-from PIL import Image as PILImage
+from PIL import Image as PILImage, ImageDraw, ImageFont 
 from jinja2 import Template
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
@@ -894,6 +894,42 @@ body{ font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,A
 # ────────────────────────────────────────────────────────────────────
 # 8. IMAGE GENERATION
 # ────────────────────────────────────────────────────────────────────
+def apply_repeating_watermark(img, text="AmazingDealsLoots"):
+    # Convert image to RGBA to support transparency
+    base = img.convert("RGBA")
+    txt_layer = PILImage.new("RGBA", base.size, (255, 255, 255, 0))
+    
+    # Try to load a standard font, fallback to default if Render doesn't have it
+    try:
+        font = ImageFont.truetype("DejaVuSans.ttf", 26) # Common on Linux/Render
+    except:
+        try:
+            font = ImageFont.truetype("arial.ttf", 26) # Common on Windows
+        except:
+            font = ImageFont.load_default()
+            
+    # Create a single text stamp (transparent background)
+    stamp = PILImage.new("RGBA", (350, 100), (255, 255, 255, 0))
+    stamp_draw = ImageDraw.Draw(stamp)
+    
+    # Draw text with 8% opacity (20 out of 255 alpha) -> Subtle but impossible to remove
+    stamp_draw.text((20, 30), text, fill=(0, 0, 0, 20), font=font)
+    
+    # Rotate the stamp diagonally
+    stamp = stamp.rotate(30, expand=1)
+    
+    # Tile the stamp across the image in a brick/staggered pattern
+    w, h = base.size
+    sw, sh = stamp.size
+    
+    for y in range(-sh, h, sh - 30):
+        offset = (y // (sh - 30)) % 2 * (sw // 2)
+        for x in range(-sw + offset, w, sw - 20):
+            txt_layer.paste(stamp, (x, y), stamp)
+            
+    # Merge the watermark onto the image and return it as standard RGB
+    return PILImage.alpha_composite(base, txt_layer).convert("RGB")
+  
 def _download_image_b64(url):
     try:
         r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
@@ -972,8 +1008,7 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", templa
             tpl.update(
                 savings_count=savings_count, 
                 total_savings_fmt=_fmt(total_savings),
-                coupon_display_text=coupon_display_text,
-                watermark="@AmazingDealsLoots" # Set your handle here
+                coupon_display_text=coupon_display_text
             )
             html = AMAZON_DEAL_TEMPLATE.render(**tpl)
 
@@ -1000,6 +1035,11 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", templa
         if bbox:
             img = img.crop((0, 0, w, min(bbox[3] + 15, h)))
     
+        # --- NEW: APPLY UNIVERSAL REPEATING WATERMARK ---
+        # This runs after the crop, so cropping works perfectly, 
+        # and it applies to EVERY template automatically!
+        img = apply_repeating_watermark(img, text="AmazingDealsLoots")
+      
         # 5. Save the cropped image
         buf_out = BytesIO()
         img.save(buf_out, format="PNG", quality=95)
