@@ -880,12 +880,7 @@ def apply_repeating_watermark(img, text="AmazingDealsLoots"):
     base = img.convert("RGBA")
     w, h = base.size
     
-    # 1. Create a massive transparent sheet
-    side = max(w, h) * 2
-    txt_layer = PILImage.new("RGBA", (side, side), (255, 255, 255, 0))
-    draw = ImageDraw.Draw(txt_layer)
-    
-    # 2. Ultra-reliable font download
+    # 1. Download font if missing (runs fast)
     font_path = "/tmp/Roboto-Bold.ttf"
     if not os.path.exists(font_path):
         try:
@@ -897,31 +892,36 @@ def apply_repeating_watermark(img, text="AmazingDealsLoots"):
             pass
             
     try:
-        # INCREASED FONT SIZE: 70px makes it thick, bold, and easily readable
-        font = ImageFont.truetype(font_path, 70)
+        # MASSIVE FONT SIZE (90px)
+        font = ImageFont.truetype(font_path, 90)
     except:
         font = ImageFont.load_default()
         
-    # 3. INCREASED SPACING: Gives the bigger text breathing room
-    step_x = 750  # Much wider horizontal gap
-    step_y = 200  # Much wider vertical gap
+    # 2. Create ONE small stamp exactly the size of the text
+    stamp_w, stamp_h = 900, 250
+    stamp = PILImage.new("RGBA", (stamp_w, stamp_h), (255, 255, 255, 0))
+    stamp_draw = ImageDraw.Draw(stamp)
     
-    for y in range(0, side, step_y):
-        # Stagger every other row
+    # DRAW TEXT: Opacity increased to 85 (~33% visible, very dark and clear)
+    stamp_draw.text((stamp_w//2 - 400, stamp_h//2 - 50), text, fill=(0, 0, 0, 85), font=font)
+    
+    # 3. Rotate only the small stamp (Lightning fast, uses 0 CPU)
+    # BICUBIC resampling keeps the text sharp when rotating
+    stamp = stamp.rotate(35, expand=1, resample=PILImage.BICUBIC)
+    
+    # 4. Tile the pre-rotated stamp across the image
+    txt_layer = PILImage.new("RGBA", base.size, (255, 255, 255, 0))
+    sw, sh = stamp.size
+    
+    step_x = sw - 100
+    step_y = sh - 100
+    
+    for y in range(-sh, h, step_y):
         offset = (y // step_y) % 2 * (step_x // 2)
-        for x in range(0 - offset, side, step_x):
-            # Draw the text (Black, ~25% opacity)
-            draw.text((x, y), text, fill=(0, 0, 0, 65), font=font)
+        for x in range(-sw + offset, w, step_x):
+            # Using 'stamp' as the 3rd argument (mask) perfectly preserves the alpha transparency!
+            txt_layer.paste(stamp, (x, y), stamp)
             
-    # 4. Rotate the massive sheet by 30 degrees
-    txt_layer = txt_layer.rotate(30, center=(side//2, side//2))
-    
-    # 5. Crop the center to match our base image perfectly
-    x0 = (side - w) // 2
-    y0 = (side - h) // 2
-    txt_layer = txt_layer.crop((x0, y0, x0 + w, y0 + h))
-    
-    # 6. Slap the sheet onto the image
     return PILImage.alpha_composite(base, txt_layer).convert("RGB")
   
 def _download_image_b64(url):
