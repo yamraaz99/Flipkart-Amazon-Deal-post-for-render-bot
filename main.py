@@ -763,22 +763,20 @@ body{ font-family:"Amazon Ember",Arial,sans-serif; background:#fff; width:{{ can
 .img-box{ {% if layout == 'stack' %}text-align:center;margin-bottom:24px; {% else %}flex-shrink:0;{% endif %} position: relative;}
 .img-box img{max-width:{{ img_max }}px;max-height:{{ img_max }}px;object-fit:contain}
 
-/* THE PREMIUM DYNAMIC STAMP */
-.exclusive-stamp {
+/* --- NEW: SLEEK NATIVE BADGE --- */
+.loot-badge {
     position: absolute;
-    top: 15px;
-    left: 15px;
-    border: 3px solid #cc0c39;
-    color: #cc0c39;
-    font-size: 18px;
-    font-weight: 900;
-    text-transform: uppercase;
-    padding: 6px 12px;
-    transform: rotate(-15deg);
-    background: rgba(255, 255, 255, 0.95);
+    top: 0px;
+    left: 0px;
+    background-color: #cc0c39; /* Amazon's authentic deal red */
+    color: #ffffff;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 5px 10px;
     border-radius: 4px;
-    letter-spacing: 1px;
-    box-shadow: 2px 2px 6px rgba(0,0,0,0.15);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
     z-index: 10;
 }
 
@@ -798,13 +796,14 @@ body{ font-family:"Amazon Ember",Arial,sans-serif; background:#fff; width:{{ can
 .pb-blue{color:#007185}
 .pb-green{color:#007600}
 
-/* --- NEW: CENTERED UN-CROPPABLE WATERMARK --- */
+/* --- UPDATED: SOFTER, AUTHENTIC WATERMARK --- */
 .wm-mid {
     text-align: center;
-    font-size: 15px;
-    font-weight: 700;
-    color: #0f1111; 
-    margin: -2px 0 6px 0; /* Perfectly balances the spacing between Total and the Red Box */
+    font-size: 13px; /* Slightly smaller */
+    font-weight: 600; 
+    color: #565959; /* Amazon's native gray */
+    margin: 2px 0 6px 0; /* Perfect spacing */
+    letter-spacing: 0.5px;
 }
 
 .pb-box{border:4px solid #fa5a4f;padding:6px 8px;margin:4px -12px}
@@ -820,9 +819,9 @@ body{ font-family:"Amazon Ember",Arial,sans-serif; background:#fff; width:{{ can
   <div class="img-box">
     <img src="data:image/jpeg;base64,{{ img_b64 }}" alt="product">
     
-    <!-- Dynamic Premium Stamp -->
+    <!-- Clean, Sleek Amazon-style Badge -->
     {% if is_huge_deal %}
-    <div class="exclusive-stamp">AMAZING LOOT</div>
+    <div class="loot-badge">&#9733; AMAZING LOOT</div>
     {% endif %}
     
   </div>
@@ -847,7 +846,7 @@ body{ font-family:"Amazon Ember",Arial,sans-serif; background:#fff; width:{{ can
       <div class="pb-r"><span>Delivery:</span><span>&#8377;0.00</span></div>
       <div class="pb-r" style="margin-bottom: 5px;"><span>Total:</span><span>&#8377;{{ price_fmt }}.00</span></div>
       
-      <!-- SANDWICHED WATERMARK (Like your mockups) -->
+      <!-- SANDWICHED WATERMARK -->
       <div class="wm-mid">{{ watermark }}</div>
       
       {% if savings_count > 0 %}
