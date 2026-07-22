@@ -759,8 +759,29 @@ AMAZON_DEAL_TEMPLATE = Template(
 *{margin:0;padding:0;box-sizing:border-box}
 body{ font-family:"Amazon Ember",Arial,sans-serif; background:#fff; width:{{ canvas_width }}px; padding:{{ pad }}px; }
 .card{ display:flex; {% if layout == 'stack' %} flex-direction:column;align-items:center; {% else %} flex-direction:row;align-items:flex-start;gap:28px; {% endif %} }
-.img-box{ {% if layout == 'stack' %}text-align:center;margin-bottom:24px; {% else %}flex-shrink:0;{% endif %} }
+
+.img-box{ {% if layout == 'stack' %}text-align:center;margin-bottom:24px; {% else %}flex-shrink:0;{% endif %} position: relative;}
 .img-box img{max-width:{{ img_max }}px;max-height:{{ img_max }}px;object-fit:contain}
+
+/* THE PREMIUM DYNAMIC STAMP */
+.exclusive-stamp {
+    position: absolute;
+    top: 15px;
+    left: 15px;
+    border: 3px solid #cc0c39;
+    color: #cc0c39;
+    font-size: 18px;
+    font-weight: 900;
+    text-transform: uppercase;
+    padding: 6px 12px;
+    transform: rotate(-15deg);
+    background: rgba(255, 255, 255, 0.95);
+    border-radius: 4px;
+    letter-spacing: 1px;
+    box-shadow: 2px 2px 6px rgba(0,0,0,0.15);
+    z-index: 10;
+}
+
 .info-panel{flex:1;min-width:0;width:100%}
 .cpn-card { background: #fff; border: 1px solid #e7e7e7; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; overflow: hidden; }
 .cpn-icon { float: left; width: 34px; margin-right: 15px; margin-top: 10px; }
@@ -771,10 +792,21 @@ body{ font-family:"Amazon Ember",Arial,sans-serif; background:#fff; width:{{ can
 .cpn-green { background-color: #7ddc67; color: #0f1111; padding: 2px 4px; margin-left: -2px; }
 .cpn-right { float: right; margin-top: 3px; }
 .cpn-btn { background: #fff; border: 1px solid #8d9096; border-radius: 8px; padding: 8px 18px; font-size: 18px; color: #0f1111; display: inline-block; text-align: center; }
+
 .pb{color:#0f1111;font-size:16px;padding:0 12px}
 .pb-r{display:flex;justify-content:space-between;margin-bottom:9px;line-height:1.2}
 .pb-blue{color:#007185}
 .pb-green{color:#007600}
+
+/* --- NEW: CENTERED UN-CROPPABLE WATERMARK --- */
+.wm-mid {
+    text-align: center;
+    font-size: 15px;
+    font-weight: 700;
+    color: #0f1111; 
+    margin: -2px 0 6px 0; /* Perfectly balances the spacing between Total and the Red Box */
+}
+
 .pb-box{border:4px solid #fa5a4f;padding:6px 8px;margin:4px -12px}
 .pb-box .pb-r{margin-bottom:9px}
 .pb-box .pb-r:last-child{margin-bottom:0}
@@ -785,7 +817,15 @@ body{ font-family:"Amazon Ember",Arial,sans-serif; background:#fff; width:{{ can
 </head>
 <body>
 <div class="card">
-  <div class="img-box"><img src="data:image/jpeg;base64,{{ img_b64 }}" alt="product"></div>
+  <div class="img-box">
+    <img src="data:image/jpeg;base64,{{ img_b64 }}" alt="product">
+    
+    <!-- Dynamic Premium Stamp -->
+    {% if is_huge_deal %}
+    <div class="exclusive-stamp">AMAZING LOOT</div>
+    {% endif %}
+    
+  </div>
   <div class="info-panel">
     {% if coupon_disc > 0 %}
     <div class="cpn-card">
@@ -797,7 +837,7 @@ body{ font-family:"Amazon Ember",Arial,sans-serif; background:#fff; width:{{ can
       </div>
       <div class="cpn-txt">
         <div class="cpn-title">Coupon Discount</div>
-        <div class="cpn-desc"><span class="cpn-green">Save &#8377;{{ coupon_disc_fmt }}</span> with coupon</div>
+        <div class="cpn-desc"><span class="cpn-green">Save {{ coupon_display_text }}</span> with coupon</div>
       </div>
       <div class="cpn-right"><div class="cpn-btn">Apply</div></div>
     </div>
@@ -805,7 +845,11 @@ body{ font-family:"Amazon Ember",Arial,sans-serif; background:#fff; width:{{ can
     <div class="pb">
       <div class="pb-r"><span>Items:</span><span>&#8377;{{ price_fmt }}.00</span></div>
       <div class="pb-r"><span>Delivery:</span><span>&#8377;0.00</span></div>
-      <div class="pb-r"><span>Total:</span><span>&#8377;{{ price_fmt }}.00</span></div>
+      <div class="pb-r" style="margin-bottom: 5px;"><span>Total:</span><span>&#8377;{{ price_fmt }}.00</span></div>
+      
+      <!-- SANDWICHED WATERMARK (Like your mockups) -->
+      <div class="wm-mid">{{ watermark }}</div>
+      
       {% if savings_count > 0 %}
       <div class="pb-box">
         <div class="pb-r"><span class="pb-blue">Savings ({{ savings_count }}):<span class="pb-caret"></span></span><span class="pb-green">&minus;&#8377;{{ total_savings_fmt }}.00</span></div>
@@ -813,8 +857,10 @@ body{ font-family:"Amazon Ember",Arial,sans-serif; background:#fff; width:{{ can
         {% if coupon_disc > 0 %}<div class="pb-r"><span>Your Coupon Savings</span><span>&minus;&#8377;{{ coupon_disc_fmt }}.00</span></div>{% endif %}
       </div>
       {% endif %}
+      
       <div class="pb-div"></div>
       <div class="pb-r pb-total"><span>Order Total:</span><span>&#8377;{{ effective_fmt }}.00</span></div>
+      
     </div>
   </div>
 </div>
