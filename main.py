@@ -878,21 +878,33 @@ def apply_repeating_watermark(img, text="AmazingDealsLoots"):
     base = img.convert("RGBA")
     txt_layer = PILImage.new("RGBA", base.size, (255, 255, 255, 0))
     
-    # Try to load a standard font, fallback to default if Render doesn't have it
-    try:
-        font = ImageFont.truetype("DejaVuSans.ttf", 26) # Common on Linux/Render
-    except:
+    # Robust font loading (tries multiple common Linux/Windows fonts)
+    font_size = 40
+    font = None
+    font_paths = [
+        "DejaVuSans-Bold.ttf", "DejaVuSans.ttf", 
+        "LiberationSans-Bold.ttf", "LiberationSans-Regular.ttf", 
+        "FreeSansBold.ttf", "FreeSans.ttf", 
+        "arial.ttf", "arialbd.ttf"
+    ]
+    
+    for path in font_paths:
         try:
-            font = ImageFont.truetype("arial.ttf", 26) # Common on Windows
-        except:
-            font = ImageFont.load_default()
+            font = ImageFont.truetype(path, font_size)
+            break
+        except Exception:
+            continue
             
-    # Create a single text stamp (transparent background)
-    stamp = PILImage.new("RGBA", (350, 100), (255, 255, 255, 0))
+    # If it STILL fails, it will use the tiny default, so let's hope the list above works!
+    if font is None:
+        font = ImageFont.load_default()
+            
+    # Create a larger stamp to fit the bigger font
+    stamp = PILImage.new("RGBA", (500, 150), (255, 255, 255, 0))
     stamp_draw = ImageDraw.Draw(stamp)
     
-    # Draw text with 8% opacity (20 out of 255 alpha) -> Subtle but impossible to remove
-    stamp_draw.text((20, 30), text, fill=(0, 0, 0, 20), font=font)
+    # Increased opacity: 45 out of 255 (approx 17% visibility)
+    stamp_draw.text((20, 50), text, fill=(0, 0, 0, 45), font=font)
     
     # Rotate the stamp diagonally
     stamp = stamp.rotate(30, expand=1)
@@ -901,8 +913,8 @@ def apply_repeating_watermark(img, text="AmazingDealsLoots"):
     w, h = base.size
     sw, sh = stamp.size
     
-    for y in range(-sh, h, sh - 30):
-        offset = (y // (sh - 30)) % 2 * (sw // 2)
+    for y in range(-sh, h, sh - 40):
+        offset = (y // (sh - 40)) % 2 * (sw // 2)
         for x in range(-sw + offset, w, sw - 20):
             txt_layer.paste(stamp, (x, y), stamp)
             
