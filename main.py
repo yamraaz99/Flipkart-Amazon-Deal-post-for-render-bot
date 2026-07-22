@@ -874,42 +874,56 @@ body{ font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,A
 # 8. IMAGE GENERATION
 # ────────────────────────────────────────────────────────────────────
 def apply_repeating_watermark(img, text="AmazingDealsLoots"):
+    import glob  # Built-in python module to hunt for font files
+    
     # Convert image to RGBA to support transparency
     base = img.convert("RGBA")
     txt_layer = PILImage.new("RGBA", base.size, (255, 255, 255, 0))
     
-    # Robust font loading (tries multiple common Linux/Windows fonts)
-    font_size = 40
+    # Bulletproof Font Loader
+    font_size = 35
     font = None
-    font_paths = [
-        "DejaVuSans-Bold.ttf", "DejaVuSans.ttf", 
-        "LiberationSans-Bold.ttf", "LiberationSans-Regular.ttf", 
-        "FreeSansBold.ttf", "FreeSans.ttf", 
-        "arial.ttf", "arialbd.ttf"
+    
+    # 1. First, try standard Linux/Render exact paths
+    common_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+        "arial.ttf"
     ]
     
-    for path in font_paths:
+    for path in common_paths:
         try:
             font = ImageFont.truetype(path, font_size)
             break
-        except Exception:
+        except:
             continue
             
-    # If it STILL fails, it will use the tiny default, so let's hope the list above works!
+    # 2. If standard paths fail, aggressively hunt the server for ANY valid font
+    if font is None:
+        try:
+            found_fonts = glob.glob("/usr/share/fonts/**/*.ttf", recursive=True)
+            if found_fonts:
+                font = ImageFont.truetype(found_fonts[0], font_size)
+        except:
+            pass
+            
+    # 3. Absolute worst-case scenario fallback
     if font is None:
         font = ImageFont.load_default()
             
-    # Create a larger stamp to fit the bigger font
+    # Create a stamp with increased dimensions to fit the bigger text
     stamp = PILImage.new("RGBA", (500, 150), (255, 255, 255, 0))
     stamp_draw = ImageDraw.Draw(stamp)
     
-    # Increased opacity: 45 out of 255 (approx 17% visibility)
-    stamp_draw.text((20, 50), text, fill=(0, 0, 0, 45), font=font)
+    # INCREASED OPACITY: 50 out of 255 (approx 20% visibility)
+    stamp_draw.text((20, 50), text, fill=(0, 0, 0, 50), font=font)
     
     # Rotate the stamp diagonally
     stamp = stamp.rotate(30, expand=1)
     
-    # Tile the stamp across the image in a brick/staggered pattern
+    # Tile the stamp across the image in a staggered pattern
     w, h = base.size
     sw, sh = stamp.size
     
