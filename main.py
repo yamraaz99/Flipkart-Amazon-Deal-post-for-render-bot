@@ -474,9 +474,16 @@ async def shorten_title_groq(full_title):
     return full_title
 
 def calc_breakdown(price, mrp, coupon, bank_offers):
-    b = {"mrp": mrp or price or 0, "price": price or 0, "coupon_disc": 0, "coupon_text": None, "after_coupon": price or 0, "best_bank": None, "best_bank_disc": 0, "best_bank_is_emi": False, "effective": price or 0}
+    b = {
+        "mrp": mrp or price or 0, "price": price or 0, "coupon_disc": 0, "coupon_text": None, 
+        "after_coupon": price or 0, "best_bank": None, "best_bank_disc": 0, 
+        "best_bank_is_emi": False, "effective": price or 0,
+        "coupon_type": None, "coupon_raw_value": 0  # <--- NEW
+    }
     if not price: return b
     if coupon:
+        b["coupon_type"] = coupon["type"]
+        b["coupon_raw_value"] = coupon["value"]
         if coupon["type"] == "percent":
             b["coupon_disc"] = int(price * coupon["value"] / 100)
             b["coupon_text"] = f"Apply {int(coupon['value'])}% Coupon on page"
@@ -935,7 +942,23 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", templa
             total_savings = 0
             if bd["coupon_disc"] > 0: savings_count += 1; total_savings += bd["coupon_disc"]
             if bd.get("best_bank_disc", 0) > 0: savings_count += 1; total_savings += bd["best_bank_disc"]
-            tpl.update(savings_count=savings_count, total_savings_fmt=_fmt(total_savings))
+            # --- NEW: Check if it's a huge deal (>= 8% extra savings) ---
+            base_price = bd["price"] if bd["price"] else 1
+            is_huge_deal = (total_savings / base_price) >= 0.08
+            
+            # --- NEW: Format Coupon Display for PNG ---
+            if bd.get("coupon_type") == "percent":
+                coupon_display_text = f"{bd['coupon_raw_value']:g}%"
+            else:
+                coupon_display_text = f"&#8377;{_fmt(bd['coupon_disc'])}"
+
+            tpl.update(
+                savings_count=savings_count, 
+                total_savings_fmt=_fmt(total_savings),
+                is_huge_deal=is_huge_deal,
+                coupon_display_text=coupon_display_text,
+                watermark="@AmazingDealsLoots" # Set your handle
+            )
             html = AMAZON_DEAL_TEMPLATE.render(**tpl)
 
     try:
@@ -980,11 +1003,19 @@ def format_caption(title, url, bd, avg_price):
     has_savings = bd["coupon_disc"] > 0 or bd.get("best_bank_disc", 0) > 0
     header = f"{title} for ₹{effective:,} (<b>Effectively</b>)" if has_savings else f"{title} for ₹{bd['price']:,}"
     parts = []
-    if bd["coupon_disc"] > 0: parts.append(f"₹{bd['coupon_disc']:,} off coupon")
+    
+    # NEW: Accurate Coupon Text in Caption
+    if bd["coupon_disc"] > 0: 
+        if bd.get("coupon_type") == "percent":
+            parts.append(f"{bd['coupon_raw_value']:g}% off coupon")
+        else:
+            parts.append(f"₹{bd['coupon_disc']:,} off coupon")
+            
     if bd.get("best_bank_disc", 0) > 0:
         bank_str = bd["best_bank"] + (" EMI" if bd.get("best_bank_is_emi") else "")
         parts.append(f"₹{bd['best_bank_disc']:,} off with {bank_str}")
-    lines =[header, ""]
+        
+    lines = [header, ""]
     if parts: lines.append(f"<b>📌Apply {' + '.join(parts)}</b>"); lines.append("")
     lines.append(url)
     return "\n".join(lines)
