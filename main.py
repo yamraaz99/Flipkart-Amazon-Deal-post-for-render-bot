@@ -763,23 +763,6 @@ body{ font-family:"Amazon Ember",Arial,sans-serif; background:#fff; width:{{ can
 .img-box{ {% if layout == 'stack' %}text-align:center;margin-bottom:24px; {% else %}flex-shrink:0;{% endif %} position: relative;}
 .img-box img{max-width:{{ img_max }}px;max-height:{{ img_max }}px;object-fit:contain}
 
-/* --- NEW: SLEEK NATIVE BADGE --- */
-.loot-badge {
-    position: absolute;
-    top: 0px;
-    left: 0px;
-    background-color: #cc0c39; /* Amazon's authentic deal red */
-    color: #ffffff;
-    font-size: 13px;
-    font-weight: 700;
-    padding: 5px 10px;
-    border-radius: 4px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.15);
-    z-index: 10;
-}
-
 .info-panel{flex:1;min-width:0;width:100%}
 .cpn-card { background: #fff; border: 1px solid #e7e7e7; border-radius: 8px; padding: 16px 20px; margin-bottom: 20px; overflow: hidden; }
 .cpn-icon { float: left; width: 34px; margin-right: 15px; margin-top: 10px; }
@@ -796,14 +779,13 @@ body{ font-family:"Amazon Ember",Arial,sans-serif; background:#fff; width:{{ can
 .pb-blue{color:#007185}
 .pb-green{color:#007600}
 
-/* --- UPDATED: SOFTER, AUTHENTIC WATERMARK --- */
+/* --- THE SANDWICHED WATERMARK (Bold & Black) --- */
 .wm-mid {
     text-align: center;
-    font-size: 13px; /* Slightly smaller */
-    font-weight: 600; 
-    color: #565959; /* Amazon's native gray */
-    margin: 2px 0 6px 0; /* Perfect spacing */
-    letter-spacing: 0.5px;
+    font-size: 15px;
+    font-weight: 700;
+    color: #0f1111; 
+    margin: -2px 0 6px 0; /* Keeps the spacing tight and uncroppable */
 }
 
 .pb-box{border:4px solid #fa5a4f;padding:6px 8px;margin:4px -12px}
@@ -818,12 +800,6 @@ body{ font-family:"Amazon Ember",Arial,sans-serif; background:#fff; width:{{ can
 <div class="card">
   <div class="img-box">
     <img src="data:image/jpeg;base64,{{ img_b64 }}" alt="product">
-    
-    <!-- Clean, Sleek Amazon-style Badge -->
-    {% if is_huge_deal %}
-    <div class="loot-badge">&#9733; AMAZING LOOT</div>
-    {% endif %}
-    
   </div>
   <div class="info-panel">
     {% if coupon_disc > 0 %}
@@ -846,7 +822,7 @@ body{ font-family:"Amazon Ember",Arial,sans-serif; background:#fff; width:{{ can
       <div class="pb-r"><span>Delivery:</span><span>&#8377;0.00</span></div>
       <div class="pb-r" style="margin-bottom: 5px;"><span>Total:</span><span>&#8377;{{ price_fmt }}.00</span></div>
       
-      <!-- SANDWICHED WATERMARK -->
+      <!-- SANDWICHED WATERMARK (Right here where it can't be cropped) -->
       <div class="wm-mid">{{ watermark }}</div>
       
       {% if savings_count > 0 %}
@@ -987,11 +963,7 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", templa
             total_savings = 0
             if bd["coupon_disc"] > 0: savings_count += 1; total_savings += bd["coupon_disc"]
             if bd.get("best_bank_disc", 0) > 0: savings_count += 1; total_savings += bd["best_bank_disc"]
-            # --- NEW: Check if it's a huge deal (>= 8% extra savings) ---
-            base_price = bd["price"] if bd["price"] else 1
-            is_huge_deal = (total_savings / base_price) >= 0.08
-            
-            # --- NEW: Format Coupon Display for PNG ---
+            # --- Format Accurate Coupon Display for PNG ---
             if bd.get("coupon_type") == "percent":
                 coupon_display_text = f"{bd['coupon_raw_value']:g}%"
             else:
@@ -1000,9 +972,8 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", templa
             tpl.update(
                 savings_count=savings_count, 
                 total_savings_fmt=_fmt(total_savings),
-                is_huge_deal=is_huge_deal,
                 coupon_display_text=coupon_display_text,
-                watermark="@AmazingDealsLoots" # Set your handle
+                watermark="@AmazingDealsLoots" # Set your handle here
             )
             html = AMAZON_DEAL_TEMPLATE.render(**tpl)
 
