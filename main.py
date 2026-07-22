@@ -875,50 +875,54 @@ body{ font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,A
 # ────────────────────────────────────────────────────────────────────
 def apply_repeating_watermark(img, text="AmazingDealsLoots"):
     import os
-    import urllib.request
+    import requests
     
-    # Convert image to RGBA to support transparency
     base = img.convert("RGBA")
-    txt_layer = PILImage.new("RGBA", base.size, (255, 255, 255, 0))
+    w, h = base.size
     
-    font_size = 45
+    # 1. Create a massive transparent sheet to avoid cutoffs when rotating
+    side = max(w, h) * 2
+    txt_layer = PILImage.new("RGBA", (side, side), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(txt_layer)
+    
+    # 2. Ultra-reliable font download using requests
     font_path = "/tmp/Roboto-Bold.ttf"
-    
-    # GUARANTEE FONT: Download Google Font directly to Render's temp folder if it doesn't exist
     if not os.path.exists(font_path):
         try:
-            urllib.request.urlretrieve(
-                "https://github.com/googlefonts/roboto/raw/main/src/hinted/Roboto-Bold.ttf", 
-                font_path
-            )
-        except Exception as e:
-            log.error(f"Failed to download font: {e}")
+            # Fetches Google's Roboto font directly from their raw Github repository
+            r = requests.get("https://raw.githubusercontent.com/google/fonts/main/apache/roboto/Roboto-Bold.ttf", timeout=10)
+            if r.status_code == 200:
+                with open(font_path, "wb") as f:
+                    f.write(r.content)
+        except:
+            pass
             
     try:
-        font = ImageFont.truetype(font_path, font_size)
+        # Size 45 is large, bold, and highly visible
+        font = ImageFont.truetype(font_path, 45)
     except:
-        font = ImageFont.load_default() # Worst-case fallback
+        font = ImageFont.load_default()
         
-    # Create a stamp with increased dimensions to fit the bigger text
-    stamp = PILImage.new("RGBA", (600, 200), (255, 255, 255, 0))
-    stamp_draw = ImageDraw.Draw(stamp)
+    # 3. Draw text in a grid directly over the massive sheet
+    step_x = 450  # Horizontal space between words
+    step_y = 120  # Vertical space between words
     
-    # Opacity 60 out of 255 (~24% visibility) - Very visible, un-croppable
-    stamp_draw.text((20, 50), text, fill=(0, 0, 0, 60), font=font)
-    
-    # Rotate the stamp diagonally
-    stamp = stamp.rotate(35, expand=1)
-    
-    # Tile the stamp across the image in a staggered pattern
-    w, h = base.size
-    sw, sh = stamp.size
-    
-    for y in range(-sh, h, sh - 50):
-        offset = (y // (sh - 50)) % 2 * (sw // 2)
-        for x in range(-sw + offset, w, sw - 20):
-            txt_layer.paste(stamp, (x, y), stamp)
+    for y in range(0, side, step_y):
+        # Stagger every other row like bricks
+        offset = (y // step_y) % 2 * (step_x // 2)
+        for x in range(0 - offset, side, step_x):
+            # (0, 0, 0, 65) = Black text with 25% opacity
+            draw.text((x, y), text, fill=(0, 0, 0, 65), font=font)
             
-    # Merge the watermark onto the image and return it as standard RGB
+    # 4. Rotate the massive sheet by 30 degrees from the center
+    txt_layer = txt_layer.rotate(30, center=(side//2, side//2))
+    
+    # 5. Crop the center of the massive sheet to match our base image perfectly
+    x0 = (side - w) // 2
+    y0 = (side - h) // 2
+    txt_layer = txt_layer.crop((x0, y0, x0 + w, y0 + h))
+    
+    # 6. Slap the sheet onto the image (Preserves 100% of the transparency)
     return PILImage.alpha_composite(base, txt_layer).convert("RGB")
   
 def _download_image_b64(url):
