@@ -874,55 +874,45 @@ body{ font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,A
 # 8. IMAGE GENERATION
 # ────────────────────────────────────────────────────────────────────
 def apply_repeating_watermark(img, text="AmazingDealsLoots"):
-    import os
-    import requests
-    
+    # 1. Convert to RGBA for transparency
     base = img.convert("RGBA")
     w, h = base.size
     
-    # 1. Download font if missing (runs fast)
-    font_path = "/tmp/Roboto-Bold.ttf"
-    if not os.path.exists(font_path):
-        try:
-            r = requests.get("https://raw.githubusercontent.com/google/fonts/main/apache/roboto/Roboto-Bold.ttf", timeout=10)
-            if r.status_code == 200:
-                with open(font_path, "wb") as f:
-                    f.write(r.content)
-        except:
-            pass
-            
+    # 2. Load your local font instantly (No internet required!)
     try:
-        # MASSIVE FONT SIZE (90px)
-        font = ImageFont.truetype(font_path, 90)
-    except:
+        font = ImageFont.truetype("Roboto-Bold.ttf", 65)
+    except Exception as e:
+        log.error("Font missing! Make sure Roboto-Bold.ttf is in the repo.")
         font = ImageFont.load_default()
         
-    # 2. Create ONE small stamp exactly the size of the text
-    stamp_w, stamp_h = 900, 250
-    stamp = PILImage.new("RGBA", (stamp_w, stamp_h), (255, 255, 255, 0))
+    # 3. Create ONE small stamp (Very low RAM)
+    stamp = PILImage.new("RGBA", (700, 200), (255, 255, 255, 0))
     stamp_draw = ImageDraw.Draw(stamp)
     
-    # DRAW TEXT: Opacity increased to 85 (~33% visible, very dark and clear)
-    stamp_draw.text((stamp_w//2 - 400, stamp_h//2 - 50), text, fill=(0, 0, 0, 85), font=font)
+    # Draw text: Black with ~25% opacity (65/255)
+    stamp_draw.text((50, 50), text, fill=(0, 0, 0, 65), font=font)
     
-    # 3. Rotate only the small stamp (Lightning fast, uses 0 CPU)
-    # BICUBIC resampling keeps the text sharp when rotating
-    stamp = stamp.rotate(35, expand=1, resample=PILImage.BICUBIC)
+    # Rotate the small stamp (Lightning fast, ~0.001 seconds)
+    stamp = stamp.rotate(30, expand=1)
     
-    # 4. Tile the pre-rotated stamp across the image
-    txt_layer = PILImage.new("RGBA", base.size, (255, 255, 255, 0))
+    # 4. Create an empty overlay exactly the size of the final image
+    overlay = PILImage.new("RGBA", base.size, (255, 255, 255, 0))
     sw, sh = stamp.size
     
+    # Spacing between the watermarks
     step_x = sw - 100
-    step_y = sh - 100
+    step_y = sh - 50
     
+    # 5. Tile the pre-rotated stamp across the overlay
     for y in range(-sh, h, step_y):
         offset = (y // step_y) % 2 * (step_x // 2)
         for x in range(-sw + offset, w, step_x):
-            # Using 'stamp' as the 3rd argument (mask) perfectly preserves the alpha transparency!
-            txt_layer.paste(stamp, (x, y), stamp)
+            # IMPORTANT: Passing 'stamp' as the 3rd argument (the mask) is what 
+            # prevents the "grey lines" glitch and keeps the alpha channel perfect.
+            overlay.paste(stamp, (x, y), stamp)
             
-    return PILImage.alpha_composite(base, txt_layer).convert("RGB")
+    # 6. Merge the overlay onto the original image
+    return PILImage.alpha_composite(base, overlay).convert("RGB")
   
 def _download_image_b64(url):
     try:
