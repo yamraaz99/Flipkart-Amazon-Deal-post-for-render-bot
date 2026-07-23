@@ -877,7 +877,11 @@ def apply_repeating_watermark(img, text="AmazingDealsLoots"):
     # 1. Convert to RGBA for transparency
     base = img.convert("RGBA")
     w, h = base.size
-    
+    # --- ABSOLUTE PATH FIX ---
+    # This forces Python to look in the exact folder where main.py lives
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    font_path = os.path.join(current_dir, "Roboto-Bold.ttf")
+  
     # 2. Load your local font instantly (No internet required!)
     try:
         font = ImageFont.truetype("Roboto-Bold.ttf", 65)
