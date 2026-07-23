@@ -890,12 +890,12 @@ def apply_repeating_watermark(img, text="AmazingDealsLoots"):
         font = ImageFont.load_default()
         
     # 3. Create ONE small stamp (Very low RAM)
-    stamp = PILImage.new("RGBA", (700, 200), (255, 255, 255, 0))
+    stamp = PILImage.new("RGBA", (850, 250), (255, 255, 255, 0))
     stamp_draw = ImageDraw.Draw(stamp)
     
     # Draw text: Black with ~25% opacity (65/255)
-    stamp_draw.text((50, 50), text, fill=(0, 0, 0, 65), font=font)
-    
+    stamp_draw.text((50, 50), text, fill=(0, 0, 0, 115), font=font)
+  
     # Rotate the small stamp (Lightning fast, ~0.001 seconds)
     stamp = stamp.rotate(30, expand=1)
     
