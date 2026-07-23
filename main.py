@@ -874,48 +874,50 @@ body{ font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,A
 # 8. IMAGE GENERATION
 # ────────────────────────────────────────────────────────────────────
 def apply_repeating_watermark(img, text="AmazingDealsLoots"):
+    import os
+    
     # 1. Convert to RGBA for transparency
     base = img.convert("RGBA")
     w, h = base.size
-    # --- ABSOLUTE PATH FIX ---
-    # This forces Python to look in the exact folder where main.py lives
+    
     current_dir = os.path.dirname(os.path.abspath(__file__))
     font_path = os.path.join(current_dir, "Roboto-Bold.ttf")
-  
-    # 2. Load your local font instantly (No internet required!)
+    
+    # --- TWEAK 1: FONT SIZE ---
+    # Dropped from 75 to 50 for a cleaner, less intrusive look
     try:
-        font = ImageFont.truetype("Roboto-Bold.ttf", 65)
+        font = ImageFont.truetype(font_path, 50)
     except Exception as e:
-        log.error("Font missing! Make sure Roboto-Bold.ttf is in the repo.")
+        log.error(f"Font error: {e}. Path checked: {font_path}")
         font = ImageFont.load_default()
         
-    # 3. Create ONE small stamp (Very low RAM)
-    stamp = PILImage.new("RGBA", (850, 250), (255, 255, 255, 0))
+    # --- TWEAK 2: STAMP SIZE ---
+    # Shrunk the canvas from (850, 250) to (600, 150) to match the smaller text
+    stamp = PILImage.new("RGBA", (600, 150), (255, 255, 255, 0))
     stamp_draw = ImageDraw.Draw(stamp)
     
-    # Draw text: Black with ~25% opacity (65/255)
+    # Text Opacity (Still at 115, which is perfect)
     stamp_draw.text((50, 50), text, fill=(0, 0, 0, 115), font=font)
-  
-    # Rotate the small stamp (Lightning fast, ~0.001 seconds)
-    stamp = stamp.rotate(30, expand=1)
     
-    # 4. Create an empty overlay exactly the size of the final image
+    # Rotate the small stamp
+    stamp = stamp.rotate(30, expand=1, resample=PILImage.BICUBIC)
+    
     overlay = PILImage.new("RGBA", base.size, (255, 255, 255, 0))
     sw, sh = stamp.size
     
-    # Spacing between the watermarks
-    step_x = sw - 100
-    step_y = sh - 50
+    # --- TWEAK 3: TIGHTER SPACING ---
+    # Subtracting a larger number brings the words much closer together.
+    # If you ever want them even closer, increase 220 and 120.
+    step_x = sw - 220  
+    step_y = sh - 120  
     
-    # 5. Tile the pre-rotated stamp across the overlay
+    # Tile the pre-rotated stamp across the overlay
     for y in range(-sh, h, step_y):
         offset = (y // step_y) % 2 * (step_x // 2)
         for x in range(-sw + offset, w, step_x):
-            # IMPORTANT: Passing 'stamp' as the 3rd argument (the mask) is what 
-            # prevents the "grey lines" glitch and keeps the alpha channel perfect.
             overlay.paste(stamp, (x, y), stamp)
             
-    # 6. Merge the overlay onto the original image
+    # Merge the overlay onto the original image
     return PILImage.alpha_composite(base, overlay).convert("RGB")
   
 def _download_image_b64(url):
