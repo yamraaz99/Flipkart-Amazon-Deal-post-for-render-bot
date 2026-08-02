@@ -1265,26 +1265,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     if BOT_TOKEN == "YOUR_TOKEN": raise ValueError("Set TELEGRAM_BOT_TOKEN environment variable!")
     
-    # Configure much larger timeouts for PTB to upload images
-    app = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .request(HTTPXRequest(
-            connection_pool_size=16,
-            connect_timeout=20.0,
-            read_timeout=60.0,
-            write_timeout=120.0,
-            pool_timeout=20.0,
-        ))
-        .get_updates_request(HTTPXRequest(
-            connection_pool_size=4,
-            connect_timeout=20.0,
-            read_timeout=40.0,
-            write_timeout=20.0,
-            pool_timeout=20.0,
-        ))
-        .build()
-    )
+    # Reverted to the simple, safe builder so it boots up without "Bad Gateway" errors!
+    app = Application.builder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("optimized", cmd_optimized))
@@ -1293,7 +1275,6 @@ def main():
     keep_alive()
     log.info("DealBot v7 running...")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
-
 
 if __name__ == "__main__":
     main()
