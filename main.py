@@ -4,6 +4,7 @@ Deal Post Bot v7 — Multi-Template Edition (Standard & Optimized)
   • Added Historical Price API for Regular Price extraction
   • Added Interactive Inline Button to toggle templates
   • Artifact-proof fast image cropping
+  • ULTRA-OPTIMIZED: JPEG compression, Semaphore limits, Memory leak fixes
 """
 
 import os
@@ -12,12 +13,13 @@ import json
 import logging
 import asyncio
 import base64
-import datetime    # <--- NEW
+import datetime
 import random
 from io import BytesIO
 from urllib.parse import urlparse
-import fitz
+from functools import lru_cache
 
+import fitz
 from weasyprint import HTML
 import httpx
 import requests
@@ -28,6 +30,8 @@ from PIL import Image as PILImage, ImageDraw, ImageFont
 from jinja2 import Template
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from telegram.request import HTTPXRequest
+from telegram.error import TimedOut, NetworkError, RetryAfter
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -55,6 +59,9 @@ logging.basicConfig(
     level=logging.INFO,
 )
 log = logging.getLogger(__name__)
+
+# Serialize heavy renders so we don't OOM kill on Render's 512MB RAM
+RENDER_SEM = asyncio.Semaphore(1)
 
 SHORT_DOMAINS =[
     "amzn.to", "amzn.in", "bit.ly",
@@ -220,7 +227,6 @@ async def api_compare(pid, pos):
 
 
 async def get_historical_regular_price(pid, pos):
-    """Fetches historical price data to establish a 'Regular Price'"""
     url = f"https://graph.bitbns.com/getPredictedData.php?type=log&indexName=interest_centers&logName=info&pos={pos}&pid={pid}&mainFL=1"
     try:
         async with httpx.AsyncClient(timeout=8) as c:
@@ -231,7 +237,6 @@ async def get_historical_regular_price(pid, pos):
                 for p in parts:
                     if "~" in p:
                         try:
-                            # Safely extract the price, cleaning trailing & symbols
                             price_str = p.split("~")[1].split("&")[0].strip()
                             val = int(price_str)
                             if val > 0:
@@ -239,14 +244,12 @@ async def get_historical_regular_price(pid, pos):
                         except:
                             pass
                 if prices:
-                    # Return the true average historical price
                     return sum(prices) // len(prices)
     except Exception as e:
         log.error(f"Error fetching regular price: {e}")
     return 0
 
 
-# Added the exact productData API endpoint provided by the user
 async def api_product_data(pid, pos):
     try:
         async with httpx.AsyncClient(timeout=10) as c:
@@ -478,7 +481,7 @@ def calc_breakdown(price, mrp, coupon, bank_offers):
         "mrp": mrp or price or 0, "price": price or 0, "coupon_disc": 0, "coupon_text": None, 
         "after_coupon": price or 0, "best_bank": None, "best_bank_disc": 0, 
         "best_bank_is_emi": False, "effective": price or 0,
-        "coupon_type": None, "coupon_raw_value": 0  # <--- NEW
+        "coupon_type": None, "coupon_raw_value": 0
     }
     if not price: return b
     if coupon:
@@ -873,61 +876,68 @@ body{ font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,A
 # ────────────────────────────────────────────────────────────────────
 # 8. IMAGE GENERATION
 # ────────────────────────────────────────────────────────────────────
-def apply_repeating_watermark(img, text="AmazingDealsLoots"):
-    import os
-    
-    # 1. Convert to RGBA for transparency
-    base = img.convert("RGBA")
-    w, h = base.size
-    
+
+# --- WATERMARK CACHING ---
+# Avoid re-loading the font and re-drawing the stamp on every single image
+@lru_cache(maxsize=4)
+def _wm_stamp(text: str, size: int = 50):
     current_dir = os.path.dirname(os.path.abspath(__file__))
     font_path = os.path.join(current_dir, "Roboto-Bold.ttf")
-    
-    # --- TWEAK 1: FONT SIZE ---
-    # Dropped from 75 to 50 for a cleaner, less intrusive look
     try:
-        font = ImageFont.truetype(font_path, 50)
+        font = ImageFont.truetype(font_path, size)
     except Exception as e:
         log.error(f"Font error: {e}. Path checked: {font_path}")
         font = ImageFont.load_default()
         
-    # --- TWEAK 2: STAMP SIZE ---
-    # Shrunk the canvas from (850, 250) to (600, 150) to match the smaller text
     stamp = PILImage.new("RGBA", (600, 150), (255, 255, 255, 0))
-    stamp_draw = ImageDraw.Draw(stamp)
-    
-    # Text Opacity (Still at 115, which is perfect)
-    stamp_draw.text((50, 50), text, fill=(0, 0, 0, 115), font=font)
-    
-    # Rotate the small stamp
-    stamp = stamp.rotate(30, expand=1, resample=PILImage.BICUBIC)
-    
-    overlay = PILImage.new("RGBA", base.size, (255, 255, 255, 0))
+    ImageDraw.Draw(stamp).text((50, 50), text, fill=(0, 0, 0, 115), font=font)
+    # Use resample=PILImage.Resampling.BICUBIC or fallback for older Pillow
+    return stamp.rotate(30, expand=1, resample=getattr(PILImage, "BICUBIC", 3))
+
+def apply_repeating_watermark(img, text="AmazingDealsLoots"):
+    stamp = _wm_stamp(text)
     sw, sh = stamp.size
     
-    # --- TWEAK 3: TIGHTER SPACING ---
-    # Subtracting a larger number brings the words much closer together.
-    # If you ever want them even closer, increase 220 and 120.
-    step_x = sw - 220  
-    step_y = sh - 120  
+    # We apply the stamp directly onto the RGB image (no RGBA composite layer needed)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    w, h = img.size
     
-    # Tile the pre-rotated stamp across the overlay
+    step_x = max(60, sw - 220)
+    step_y = max(60, sh - 120)
+    
     for y in range(-sh, h, step_y):
         offset = (y // step_y) % 2 * (step_x // 2)
         for x in range(-sw + offset, w, step_x):
-            overlay.paste(stamp, (x, y), stamp)
+            # Using stamp as the 3rd arg uses its own alpha channel as a mask!
+            img.paste(stamp, (x, y), stamp)
             
-    # Merge the overlay onto the original image
-    return PILImage.alpha_composite(base, overlay).convert("RGB")
-  
-def _download_image_b64(url):
+    return img
+
+def _download_image_b64(url, max_side=900):
+    """Downloads and PRE-SHRINKS the image to save massive WeasyPrint RAM/CPU"""
     try:
         r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-        img_bytes = r.content
-        img = PILImage.open(BytesIO(img_bytes))
-        w, h = img.size
-        b64 = base64.b64encode(img_bytes).decode("utf-8")
-        return b64, w, h
+        img = PILImage.open(BytesIO(r.content))
+        img.load()
+        w, h = img.size # keep original dims for aspect logic
+        
+        # Flatten transparency onto white
+        if img.mode in ("RGBA", "LA", "P"):
+            img = img.convert("RGBA")
+            bg = PILImage.new("RGB", img.size, (255, 255, 255))
+            bg.paste(img, mask=img.split()[-1])
+            img = bg
+        else:
+            img = img.convert("RGB")
+            
+        if max(img.size) > max_side:
+            resample_filter = getattr(PILImage, "Resampling", PILImage).LANCZOS if hasattr(PILImage, "Resampling") else PILImage.LANCZOS
+            img.thumbnail((max_side, max_side), resample_filter)
+            
+        out = BytesIO()
+        img.save(out, format="JPEG", quality=90, subsampling=0)
+        return base64.b64encode(out.getvalue()).decode("utf-8"), w, h
     except Exception:
         return ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/58BAwAI/AL+hc2rNAAAAABJRU5ErkJggg==", 1, 1)
 
@@ -940,31 +950,20 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", templa
     if template_type == "optimized":
         effective = bd["effective"]
         real_mrp = bd.get("mrp", effective)
-        # Calculate discount percentage
         tag_pct = int(((real_mrp - effective) / real_mrp) * 100) if real_mrp > effective else 0
-
-        # Auto-calculate "Tomorrow" delivery date (e.g., "05 May")
         tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
         del_date = tomorrow.strftime('%d %b')
-        
-        # Generate random realistic bought stats
         bought_rnd = random.choice(['100+', '200+', '400+', '500+', '1K+', '2K+', '3K+'])
         bought_stats = f"{bought_rnd} bought in past month"
         
         html = OPTIMIZED_DEAL_TEMPLATE.render(
-            img_b64=img_b64,
-            title=short_title or "Product Deal",
-            bought_stats=bought_stats,
-            percent_off=f"-{tag_pct}%" if tag_pct > 0 else "",
-            current_price=_fmt(effective),
-            price_cents="00",
-            mrp=_fmt(real_mrp) if real_mrp > effective else "",
-            delivery_prefix="FREE delivery",
-            delivery_date=f"Tomorrow, {del_date}"
+            img_b64=img_b64, title=short_title or "Product Deal", bought_stats=bought_stats,
+            percent_off=f"-{tag_pct}%" if tag_pct > 0 else "", current_price=_fmt(effective),
+            price_cents="00", mrp=_fmt(real_mrp) if real_mrp > effective else "",
+            delivery_prefix="FREE delivery", delivery_date=f"Tomorrow, {del_date}"
         )
 
     else:
-        # Standard Layout Rendering
         aspect = orig_w / orig_h if orig_h > 0 else 1
         is_landscape = aspect > 1.3
         layout = "stack" if is_landscape else "side"
@@ -989,55 +988,48 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", templa
             total_savings = 0
             if bd["coupon_disc"] > 0: savings_count += 1; total_savings += bd["coupon_disc"]
             if bd.get("best_bank_disc", 0) > 0: savings_count += 1; total_savings += bd["best_bank_disc"]
-            # --- Format Accurate Coupon Display for PNG ---
             if bd.get("coupon_type") == "percent":
                 coupon_display_text = f"{bd['coupon_raw_value']:g}%"
             else:
                 coupon_display_text = f"&#8377;{_fmt(bd['coupon_disc'])}"
 
-            tpl.update(
-                savings_count=savings_count, 
-                total_savings_fmt=_fmt(total_savings),
-                coupon_display_text=coupon_display_text
-            )
+            tpl.update(savings_count=savings_count, total_savings_fmt=_fmt(total_savings), coupon_display_text=coupon_display_text)
             html = AMAZON_DEAL_TEMPLATE.render(**tpl)
 
     try:
-        # 1. WeasyPrint generates a perfect PDF in memory
+        # 1. WeasyPrint PDF
         pdf_bytes = HTML(string=html).write_pdf()
     
-        # 2. PyMuPDF opens the PDF bytes and converts the first page to a PNG
-        pdf_document = fitz.open("pdf", pdf_bytes)
-        page = pdf_document.load_page(0)
-        pix = page.get_pixmap(dpi=150) 
-        png_bytes = pix.tobytes("png")
-    
-        # 3. Load the PNG into Pillow
-        buf_in = BytesIO(png_bytes)
-        img = PILImage.open(buf_in).convert("RGB")
-        w, h = img.size
+        # 2. PyMuPDF raw pixels (NO png encode/decode round trip)
+        doc = fitz.open("pdf", pdf_bytes)
+        try:
+            page = doc.load_page(0)
+            pix = page.get_pixmap(dpi=150, alpha=False)
+            img = PILImage.frombytes("RGB", (pix.width, pix.height), pix.samples)
+            w, h = img.size
+        finally:
+            doc.close() # <-- PLUG THE MEMORY LEAK!
 
-        # 4. Ultra-fast, artifact-proof threshold cropping
+        # 3. Fast Threshold cropping
         gray = img.convert("L")
         bw = gray.point(lambda x: 0 if x > 250 else 255, '1')
         bbox = bw.getbbox()
+        del gray, bw
 
         if bbox:
             img = img.crop((0, 0, w, min(bbox[3] + 15, h)))
     
-        # --- NEW: APPLY UNIVERSAL REPEATING WATERMARK ---
-        # This runs after the crop, so cropping works perfectly, 
-        # and it applies to EVERY template automatically!
+        # 4. Watermark applied directly to pixels
         img = apply_repeating_watermark(img, text="AmazingDealsLoots")
       
-        # 5. Save the cropped image
+        # 5. Save the cropped image as JPEG to stop Telegram TimedOut errors
         buf_out = BytesIO()
-        img.save(buf_out, format="PNG", quality=95)
+        img.save(buf_out, format="JPEG", quality=92, subsampling=0, optimize=False)
         buf_out.seek(0)
         return buf_out
 
     except Exception as e:
-        log.error(f"Render error: {e}")
+        log.error(f"Render error: {e}", exc_info=True)
         return None
 
 
@@ -1050,7 +1042,6 @@ def format_caption(title, url, bd, avg_price):
     header = f"{title} for ₹{effective:,} (<b>Effectively</b>)" if has_savings else f"{title} for ₹{bd['price']:,}"
     parts = []
     
-    # NEW: Accurate Coupon Text in Caption
     if bd["coupon_disc"] > 0: 
         if bd.get("coupon_type") == "percent":
             parts.append(f"{bd['coupon_raw_value']:g}% off coupon")
@@ -1067,13 +1058,51 @@ def format_caption(title, url, bd, avg_price):
     return "\n".join(lines)
 
 
+# Retry helpers to handle temporary network hiccups and timeouts gracefully
+async def send_photo_retry(msg, buf, caption, keyboard, tries=3):
+    last = None
+    for i in range(tries):
+        try:
+            buf.seek(0)
+            return await msg.reply_photo(
+                photo=buf, caption=caption, parse_mode="HTML",
+                reply_markup=keyboard,
+                read_timeout=90, write_timeout=120, connect_timeout=30
+            )
+        except RetryAfter as e:
+            await asyncio.sleep(e.retry_after + 1)
+            last = e
+        except (TimedOut, NetworkError) as e:
+            log.warning(f"send_photo attempt {i+1} failed: {e}")
+            await asyncio.sleep(2 * (i + 1))
+            last = e
+    raise last
+
+async def edit_media_retry(query, buf, caption, keyboard, tries=3):
+    last = None
+    for i in range(tries):
+        try:
+            buf.seek(0)
+            return await query.edit_message_media(
+                media=InputMediaPhoto(buf, caption=caption, parse_mode="HTML"),
+                reply_markup=keyboard,
+                read_timeout=90, write_timeout=120, connect_timeout=30
+            )
+        except RetryAfter as e:
+            await asyncio.sleep(e.retry_after + 1)
+            last = e
+        except (TimedOut, NetworkError) as e:
+            log.warning(f"edit_media attempt {i+1} failed: {e}")
+            await asyncio.sleep(2 * (i + 1))
+            last = e
+    raise last
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Send me any Amazon or Flipkart link.\nI'll generate a deal post with price breakdown & offers!")
 
 async def cmd_optimized(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Toggles the default template between Standard and Optimized."""
     current_mode = context.user_data.get('default_mode', 'standard')
-    
     if current_mode == 'standard':
         context.user_data['default_mode'] = 'optimized'
         await update.message.reply_text("✅ Default mode set to **Optimized**.\nAll future links will generate the optimized post first. You can still use the inline button to switch manually.", parse_mode="Markdown")
@@ -1083,9 +1112,9 @@ async def cmd_optimized(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
-  # --- NEW: Prevents crashes if someone edits a message or sends a weird update ---
     if not msg:
         return
+        
     text = msg.text or msg.caption or ""
     url_m = re.search(r"(https?://[^\s]+)", text)
     if not url_m: return
@@ -1095,7 +1124,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = await msg.reply_text("⏳ Processing...")
 
     try:
-        resolved = resolve_url(raw_url)
+        # NON-BLOCKING URL RESOLVE
+        resolved = await asyncio.to_thread(resolve_url, raw_url)
         mkt, pid, pos = detect_marketplace(resolved)
         if not mkt or not pid:
             await status.edit_text("❌ Couldn't detect product.")
@@ -1104,7 +1134,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         product_url = make_clean_url(mkt, pid, resolved)
         await status.edit_text("📦 Fetching data...")
 
-        # Phase 1: parallel API calls (Now includes api_product_data)
         details, thunder, compare, reg_price, prod_data = await asyncio.gather(
             api_product_details(resolved),
             api_thunder(pid, pos),
@@ -1119,11 +1148,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if isinstance(reg_price, Exception): reg_price = 0
         if isinstance(prod_data, Exception): prod_data = {}
 
-        # Fallback raw_title checks the new prod_data first
         raw_title = prod_data.get("name") or details.get("prod") or details.get("title") or "Product"
         await status.edit_text("🔍 Scraping & preparing...")
 
-        # Phase 2: parallel scrape + title shorten
         scrape_fn = scrape_amazon if mkt == "amazon" else scrape_flipkart
         scraped_result, short_title = await asyncio.gather(
             asyncio.to_thread(scrape_fn, product_url),
@@ -1139,7 +1166,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         scraped = scraped_result
         image_url = prod_data.get("image") or details.get("image") or ""
         
-        # Pulls from scraped -> prod_data -> details 
         price = (
             scraped.get("current_price") 
             or _clean_price(prod_data.get("cur_price")) 
@@ -1148,7 +1174,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         if not price and thunder.get("avg"): price = int(thunder["avg"])
         
-        # Safely extracts MRP checking both api endpoints and keys
         api_mrp = (
             _clean_price(prod_data.get("mrpFloat")) 
             or _clean_price(details.get("mrp")) 
@@ -1156,8 +1181,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             or 0
         )
         scraped_mrp = _clean_price(scraped.get("mrp")) or 0
-            
-        # The true MRP is always the highest valid number we found from ANY source
         mrp = max(scraped_mrp, api_mrp, price)
         
         avg_p = thunder.get("avg", 0)
@@ -1165,23 +1188,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         bd = calc_breakdown(price, mrp, scraped.get("coupon"), scraped.get("bank_offers",[]))
         await status.edit_text("🎨 Generating deal card...")
 
-        # Save to Cache so we can instantly switch templates on button click without re-scraping!
         caption = format_caption(short_title, product_url, bd, avg_p)
         context.user_data['deal_cache'] = {
             'image_url': image_url, 'bd': bd, 'bank_offers': scraped.get("bank_offers",[]),
             'mkt': mkt, 'short_title': short_title, 'reg_price': reg_price, 'caption': caption
         }
 
-        # Retrieve user's default template preference
         default_mode = context.user_data.get('default_mode', 'standard')
 
-        # Generate Image based on default mode
-        deal_img = await asyncio.to_thread(
-            generate_deal_image, image_url, bd, scraped.get("bank_offers",[]), 
-            marketplace=mkt, template_type=default_mode, short_title=short_title, reg_price=reg_price
-        )
+        # SEMAPHORE: Queue heavy renders so we don't crash
+        async with RENDER_SEM:
+            deal_img = await asyncio.to_thread(
+                generate_deal_image, image_url, bd, scraped.get("bank_offers",[]), 
+                marketplace=mkt, template_type=default_mode, short_title=short_title, reg_price=reg_price
+            )
 
-        # Build Interactive Button offering the OPPOSITE layout
         if default_mode == "optimized":
             btn_text = "🖼️ Show Standard Version"
             btn_cb = "std_version"
@@ -1192,7 +1213,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(btn_text, callback_data=btn_cb)]])
 
         if deal_img:
-            await msg.reply_photo(photo=deal_img, caption=caption, parse_mode="HTML", reply_markup=keyboard)
+            await send_photo_retry(msg, deal_img, caption, keyboard)
         else:
             await msg.reply_text(caption, disable_web_page_preview=True, parse_mode="HTML")
 
@@ -1204,7 +1225,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles the Toggle Button to switch between Standard and Optimized cards instantly."""
     query = update.callback_query
     await query.answer("🎨 Generating new layout...", show_alert=False)
     
@@ -1221,22 +1241,41 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(new_text, callback_data=new_data)]])
     
-    deal_img = await asyncio.to_thread(
-        generate_deal_image, cache['image_url'], cache['bd'], cache['bank_offers'], 
-        marketplace=cache['mkt'], template_type="optimized" if is_optimized else "standard", 
-        short_title=cache['short_title'], reg_price=cache['reg_price']
-    )
+    async with RENDER_SEM:
+        deal_img = await asyncio.to_thread(
+            generate_deal_image, cache['image_url'], cache['bd'], cache['bank_offers'], 
+            marketplace=cache['mkt'], template_type="optimized" if is_optimized else "standard", 
+            short_title=cache['short_title'], reg_price=cache['reg_price']
+        )
     
     if deal_img:
-        await query.edit_message_media(
-            media=InputMediaPhoto(deal_img, caption=cache['caption'], parse_mode="HTML"),
-            reply_markup=keyboard
-        )
+        await edit_media_retry(query, deal_img, cache['caption'], keyboard)
 
 
 def main():
     if BOT_TOKEN == "YOUR_TOKEN": raise ValueError("Set TELEGRAM_BOT_TOKEN environment variable!")
-    app = Application.builder().token(BOT_TOKEN).build()
+    
+    # Configure much larger timeouts for PTB to upload images
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .request(HTTPXRequest(
+            connection_pool_size=16,
+            connect_timeout=20.0,
+            read_timeout=60.0,
+            write_timeout=120.0,
+            pool_timeout=20.0,
+        ))
+        .get_updates_request(HTTPXRequest(
+            connection_pool_size=4,
+            connect_timeout=20.0,
+            read_timeout=40.0,
+            write_timeout=20.0,
+            pool_timeout=20.0,
+        ))
+        .build()
+    )
+    
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("optimized", cmd_optimized))
     app.add_handler(MessageHandler((filters.TEXT | filters.CAPTION) & ~filters.COMMAND, handle_message))
