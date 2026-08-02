@@ -875,42 +875,52 @@ body{ font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,A
 
 # ────────────────────────────────────────────────────────────────────
 # 8. IMAGE GENERATION
-# ────────────────────────────────────────────────────────────────────
-
 # --- WATERMARK CACHING ---
-# Avoid re-loading the font and re-drawing the stamp on every single image
-@lru_cache(maxsize=4)
-def _wm_stamp(text: str, size: int = 50):
+# We render a massive full-page watermark ONCE, store it in memory, 
+# and apply it in 1 single paste operation instead of 250 loops!
+@lru_cache(maxsize=1)
+def get_full_watermark_overlay(text: str, width=1000, height=1800):
     current_dir = os.path.dirname(os.path.abspath(__file__))
     font_path = os.path.join(current_dir, "Roboto-Bold.ttf")
     try:
-        font = ImageFont.truetype(font_path, size)
+        font = ImageFont.truetype(font_path, 50)
     except Exception as e:
         log.error(f"Font error: {e}. Path checked: {font_path}")
         font = ImageFont.load_default()
         
     stamp = PILImage.new("RGBA", (600, 150), (255, 255, 255, 0))
     ImageDraw.Draw(stamp).text((50, 50), text, fill=(0, 0, 0, 115), font=font)
-    # Use resample=PILImage.Resampling.BICUBIC or fallback for older Pillow
-    return stamp.rotate(30, expand=1, resample=getattr(PILImage, "BICUBIC", 3))
+    stamp = stamp.rotate(30, expand=1, resample=getattr(PILImage, "BICUBIC", 3))
 
-def apply_repeating_watermark(img, text="AmazingDealsLoots"):
-    stamp = _wm_stamp(text)
+    # Create the giant overlay
+    overlay = PILImage.new("RGBA", (width, height), (255, 255, 255, 0))
     sw, sh = stamp.size
-    
-    # We apply the stamp directly onto the RGB image (no RGBA composite layer needed)
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-    w, h = img.size
     
     step_x = max(60, sw - 220)
     step_y = max(60, sh - 120)
     
-    for y in range(-sh, h, step_y):
+    # Tile the stamp onto the overlay (This heavy math only happens ONCE)
+    for y in range(-sh, height, step_y):
         offset = (y // step_y) % 2 * (step_x // 2)
-        for x in range(-sw + offset, w, step_x):
-            # Using stamp as the 3rd arg uses its own alpha channel as a mask!
-            img.paste(stamp, (x, y), stamp)
+        for x in range(-sw + offset, width, step_x):
+            overlay.paste(stamp, (x, y), stamp)
+            
+    return overlay
+
+def apply_repeating_watermark(img, text="AmazingDealsLoots"):
+    w, h = img.size
+    
+    # Fetch the pre-rendered full-page overlay instantly from memory
+    overlay = get_full_watermark_overlay(text)
+    
+    # Crop it to exactly match the current deal card's dimensions
+    cropped_overlay = overlay.crop((0, 0, w, h))
+    
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+        
+    # ONE single, lightning-fast paste operation!
+    img.paste(cropped_overlay, (0, 0), cropped_overlay)
             
     return img
 
