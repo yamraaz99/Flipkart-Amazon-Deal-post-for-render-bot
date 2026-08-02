@@ -1026,12 +1026,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     if BOT_TOKEN == "YOUR_TOKEN": raise ValueError("Set TELEGRAM_BOT_TOKEN environment variable!")
     
-    # 1. Tell Telegram to wait 30 seconds instead of 5 seconds during Render's slow wake-up
-    # We do NOT touch any complex connection pool settings. Just pure timeouts.
-    req = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0, write_timeout=60.0)
-    
-    # 2. Safely apply the timeouts to the builder
-    app = Application.builder().token(BOT_TOKEN).request(req).get_updates_request(req).build()
+    # 1. PURE, SIMPLE BUILDER: No custom network settings. Let Telegram use its native, stable defaults.
+    app = Application.builder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("optimized", cmd_optimized))
@@ -1041,8 +1037,16 @@ def main():
     keep_alive()
     log.info("DealBot v7 running...")
     
-    # 3. drop_pending_updates=True stops the bot from suffocating on old messages on boot
-    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    # 2. THE MAGIC FIX: 
+    # - bootstrap_retries=-1 : If Render throws a "Bad Gateway" or "Timeout" on boot, the bot will auto-retry instead of crashing!
+    # - timeout=30 : Tells the bot to be patient with Render's slow free-tier network.
+    # - drop_pending_updates=True : Ignores old messages while the bot was asleep so it doesn't choke.
+    app.run_polling(
+        allowed_updates=Update.ALL_TYPES, 
+        drop_pending_updates=True,
+        bootstrap_retries=-1,
+        timeout=30
+    )
 
 if __name__ == "__main__":
     main()
