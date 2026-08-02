@@ -25,7 +25,7 @@ from keep_alive import keep_alive
 from fake_useragent import UserAgent
 from PIL import Image as PILImage, ImageDraw, ImageFont 
 from jinja2 import Template
-
+from telegram.request import HTTPXRequest
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from telegram.ext import (
     Application,
@@ -1026,8 +1026,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     if BOT_TOKEN == "YOUR_TOKEN": raise ValueError("Set TELEGRAM_BOT_TOKEN environment variable!")
     
-    # Simple, Original Telegram Builder. No connection overrides. No Bad Gateway!
-    app = Application.builder().token(BOT_TOKEN).build()
+    # 1. Tell Telegram to wait 30 seconds instead of 5 seconds during Render's slow wake-up
+    # We do NOT touch any complex connection pool settings. Just pure timeouts.
+    req = HTTPXRequest(connect_timeout=30.0, read_timeout=30.0, write_timeout=60.0)
+    
+    # 2. Safely apply the timeouts to the builder
+    app = Application.builder().token(BOT_TOKEN).request(req).get_updates_request(req).build()
     
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("optimized", cmd_optimized))
@@ -1037,8 +1041,8 @@ def main():
     keep_alive()
     log.info("DealBot v7 running...")
     
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
-
+    # 3. drop_pending_updates=True stops the bot from suffocating on old messages on boot
+    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
