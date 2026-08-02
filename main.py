@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """
 Deal Post Bot v7 — Multi-Template Edition (Standard & Optimized)
-  • Added Historical Price API for Regular Price extraction
-  • Added Interactive Inline Button to toggle templates
-  • Artifact-proof fast image cropping
-  • ULTRA-OPTIMIZED: JPEG compression, Semaphore limits, Memory leak fixes
+  • Cleaned up! No messy network overrides.
+  • Lightning-fast JPEG output to prevent timeouts.
 """
 
 import os
@@ -17,7 +15,6 @@ import datetime
 import random
 from io import BytesIO
 from urllib.parse import urlparse
-from functools import lru_cache
 
 import fitz
 from weasyprint import HTML
@@ -30,8 +27,6 @@ from PIL import Image as PILImage, ImageDraw, ImageFont
 from jinja2 import Template
 
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
-from telegram.request import HTTPXRequest
-from telegram.error import TimedOut, NetworkError, RetryAfter
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -41,7 +36,6 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# curl_cffi for Flipkart TLS fingerprinting
 try:
     from curl_cffi import requests as cffi_requests
     _HAS_CFFI = True
@@ -59,9 +53,6 @@ logging.basicConfig(
     level=logging.INFO,
 )
 log = logging.getLogger(__name__)
-
-# Serialize heavy renders so we don't OOM kill on Render's 512MB RAM
-RENDER_SEM = asyncio.Semaphore(1)
 
 SHORT_DOMAINS =[
     "amzn.to", "amzn.in", "bit.ly",
@@ -94,9 +85,6 @@ def _get_bank_color(bank_name):
     return "#666666"
 
 
-# ────────────────────────────────────────────────────────────────────
-# 1. URL HANDLING
-# ────────────────────────────────────────────────────────────────────
 def resolve_url(url):
     domain = urlparse(url).netloc
     if any(sd in domain for sd in SHORT_DOMAINS):
@@ -132,9 +120,6 @@ def make_clean_url(mkt, pid, url):
     return url
 
 
-# ────────────────────────────────────────────────────────────────────
-# 2. HEADERS
-# ────────────────────────────────────────────────────────────────────
 def _desktop_headers():
     ua = UserAgent(
         fallback="Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -174,9 +159,6 @@ def _clean_price(txt):
         return None
 
 
-# ────────────────────────────────────────────────────────────────────
-# 3. BUYHATKE & HISTORICAL APIs
-# ────────────────────────────────────────────────────────────────────
 async def api_product_details(url):
     try:
         async with httpx.AsyncClient(timeout=15) as c:
@@ -261,9 +243,6 @@ async def api_product_data(pid, pos):
         return {}
 
 
-# ────────────────────────────────────────────────────────────────────
-# 4. BANK OFFER EXTRACTION & SCRAPERS (UNCHANGED)
-# ────────────────────────────────────────────────────────────────────
 def _extract_bank_offers_amazon(soup):
     offers =[]
     seen = set()
@@ -521,233 +500,63 @@ OPTIMIZED_DEAL_TEMPLATE = Template(
 <head>
 <meta charset="UTF-8">
 <style>
-    /* Generous canvas, Pillow will auto-crop the empty space perfectly */
     @page { size: 900px 420px; margin: 0; }
-    
-    body {
-        background-color: #f7f9fa; 
-        font-family: Arial, sans-serif; 
-        margin: 0;
-        padding: 35px;
-        -webkit-font-smoothing: antialiased;
-    }
-
-    /* WeasyPrint Safe Table Layout */
-    .product-card {
-        display: table;
-        width: 830px;
-        background-color: transparent;
-        color: #0f1111;
-    }
-
-    /* Left Column: Image */
-    .image-col {
-        display: table-cell;
-        vertical-align: middle;
-        width: 250px;
-        padding-right: 35px;
-        text-align: center;
-    }
-
-    .image-wrapper {
-        display: inline-block;
-        line-height: 0; /* Removes ghost spacing below the image */
-    }
-
-    .image-wrapper img {
-        max-width: 240px;
-        max-height: 240px;
-        object-fit: contain;
-    }
-
-    /* Right Column: Product Details */
-    .details-col {
-        display: table-cell;
-        vertical-align: middle;
-        width: 580px;
-    }
-
-    .product-title {
-        font-size: 28px;
-        font-weight: 400;
-        margin: 0 0 12px 0;
-        line-height: 1.35;
-        color: #0f1111;
-    }
-
-    .bought-stats {
-        font-size: 24px;
-        color: #0f1111;
-        margin: 0 0 16px 0;
-    }
-
-    .deal-tag {
-        color: #cc0c39;
-        font-size: 24px;
-        font-weight: 700;
-        margin: 0 0 15px 0;
-    }
-
-    /* Pricing Area - Inline Blocks for perfect vertical alignment */
-    .pricing-row {
-        margin-bottom: 8px; /* Creates the gap between Price and MRP */
-    }
-
-    .discount-box {
-        display: inline-block;
-        background-color: #cc0c39;
-        color: #ffffff;
-        padding: 8px 14px;
-        border-radius: 6px;
-        font-size: 32px;
-        font-weight: 400;
-        vertical-align: middle;
-        margin-right: 15px;
-    }
-
-    .price-block {
-        display: inline-block;
-        vertical-align: middle;
-    }
-
-    .currency-sym {
-        display: inline-block;
-        font-size: 24px;
-        font-weight: 500;
-        vertical-align: top;
-        margin-top: 6px;
-        margin-right: 2px;
-    }
-
-    .price-main {
-        display: inline-block;
-        font-size: 52px;
-        font-weight: 700;
-        line-height: 1;
-        vertical-align: middle;
-        letter-spacing: -1px;
-    }
-
-    .price-cents {
-        display: inline-block;
-        font-size: 20px;
-        font-weight: 700;
-        vertical-align: top;
-        margin-top: 4px;
-    }
-
-    /* MRP */
-    .mrp-row {
-        font-size: 24px;
-        color: #565959;
-        margin-bottom: 12px;
-    }
-
-    .mrp-strike {
-        text-decoration: line-through;
-    }
-
-    /* Prime and Today Badge Row */
-    .prime-row {
-        margin-bottom: 12px;
-    }
-
-    .prime-logo-wrapper {
-        display: inline-block;
-        vertical-align: middle;
-    }
-
-    .prime-tick {
-        display: inline-block;
-        vertical-align: middle;
-        margin-right: 2px;
-    }
-
-    .prime-text {
-        display: inline-block;
-        vertical-align: middle;
-        color: #00a8e1;
-        font-weight: 700;
-        font-size: 26px;
-        letter-spacing: -0.5px;
-    }
-
-    .today-badge {
-        display: inline-block;
-        vertical-align: middle;
-        background-color: #1ea0f5;
-        color: #ffffff;
-        font-size: 22px;
-        font-weight: 700;
-        font-style: italic;
-        padding: 3px 10px;
-        border-radius: 4px;
-        margin-left: 10px;
-    }
-
-    /* Delivery Info */
-    .delivery-info {
-        font-size: 22px;
-        color: #0f1111;
-    }
-
-    .delivery-info strong {
-        font-weight: 700;
-    }
+    body { background-color: #f7f9fa; font-family: Arial, sans-serif; margin: 0; padding: 35px; -webkit-font-smoothing: antialiased; }
+    .product-card { display: table; width: 830px; background-color: transparent; color: #0f1111; }
+    .image-col { display: table-cell; vertical-align: middle; width: 250px; padding-right: 35px; text-align: center; }
+    .image-wrapper { display: inline-block; line-height: 0; }
+    .image-wrapper img { max-width: 240px; max-height: 240px; object-fit: contain; }
+    .details-col { display: table-cell; vertical-align: middle; width: 580px; }
+    .product-title { font-size: 28px; font-weight: 400; margin: 0 0 12px 0; line-height: 1.35; color: #0f1111; }
+    .bought-stats { font-size: 24px; color: #0f1111; margin: 0 0 16px 0; }
+    .deal-tag { color: #cc0c39; font-size: 24px; font-weight: 700; margin: 0 0 15px 0; }
+    .pricing-row { margin-bottom: 8px; }
+    .discount-box { display: inline-block; background-color: #cc0c39; color: #ffffff; padding: 8px 14px; border-radius: 6px; font-size: 32px; font-weight: 400; vertical-align: middle; margin-right: 15px; }
+    .price-block { display: inline-block; vertical-align: middle; }
+    .currency-sym { display: inline-block; font-size: 24px; font-weight: 500; vertical-align: top; margin-top: 6px; margin-right: 2px; }
+    .price-main { display: inline-block; font-size: 52px; font-weight: 700; line-height: 1; vertical-align: middle; letter-spacing: -1px; }
+    .price-cents { display: inline-block; font-size: 20px; font-weight: 700; vertical-align: top; margin-top: 4px; }
+    .mrp-row { font-size: 24px; color: #565959; margin-bottom: 12px; }
+    .mrp-strike { text-decoration: line-through; }
+    .prime-row { margin-bottom: 12px; }
+    .prime-logo-wrapper { display: inline-block; vertical-align: middle; }
+    .prime-tick { display: inline-block; vertical-align: middle; margin-right: 2px; }
+    .prime-text { display: inline-block; vertical-align: middle; color: #00a8e1; font-weight: 700; font-size: 26px; letter-spacing: -0.5px; }
+    .today-badge { display: inline-block; vertical-align: middle; background-color: #1ea0f5; color: #ffffff; font-size: 22px; font-weight: 700; font-style: italic; padding: 3px 10px; border-radius: 4px; margin-left: 10px; }
+    .delivery-info { font-size: 22px; color: #0f1111; }
+    .delivery-info strong { font-weight: 700; }
 </style>
 </head>
 <body>
-
     <div class="product-card">
-        
-        <!-- Image Only -->
         <div class="image-col">
-            <div class="image-wrapper">
-                <img src="data:image/jpeg;base64,{{ img_b64 }}" alt="Product Image">
-            </div>
+            <div class="image-wrapper"><img src="data:image/jpeg;base64,{{ img_b64 }}" alt="Product Image"></div>
         </div>
-
-        <!-- Details -->
         <div class="details-col">
             <h2 class="product-title">{{ title }}</h2>
-            
             <div class="bought-stats">{{ bought_stats }}</div>
-            
             <div class="deal-tag">Limited time deal</div>
-
             <div class="pricing-row">
                 {% if percent_off %}
                 <div class="discount-box">{{ percent_off }}</div>
                 {% endif %}
-                
                 <div class="price-block">
                     <span class="currency-sym">₹</span><span class="price-main">{{ current_price }}</span><span class="price-cents">{{ price_cents }}</span>
                 </div>
             </div>
-            
             {% if mrp %}
             <div class="mrp-row">M.R.P.: <span class="mrp-strike">₹{{ mrp }}</span></div>
             {% endif %}
-
-            <!-- Prime Row -->
             <div class="prime-row">
                 <div class="prime-logo-wrapper">
-                    <!-- Amazon orange tick approximation -->
-                    <svg class="prime-tick" width="22" height="16" viewBox="0 0 24 18" fill="none" stroke="#FF9900" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                        <polyline points="4 10 9 15 20 2"></polyline>
-                    </svg>
+                    <svg class="prime-tick" width="22" height="16" viewBox="0 0 24 18" fill="none" stroke="#FF9900" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="4 10 9 15 20 2"></polyline></svg>
                     <span class="prime-text">prime</span>
                 </div>
                 <div class="today-badge">Tomorrow</div>
             </div>
-
-            <div class="delivery-info">
-                {{ delivery_prefix }} <strong>{{ delivery_date }}</strong>
-            </div>
+            <div class="delivery-info">{{ delivery_prefix }} <strong>{{ delivery_date }}</strong></div>
         </div>
-
     </div>
-
 </body>
 </html>"""
 )
@@ -873,15 +682,18 @@ body{ font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,A
 </html>"""
 )
 
+
 # ────────────────────────────────────────────────────────────────────
 # 8. IMAGE GENERATION
-# --- WATERMARK CACHING ---
-# We render a massive full-page watermark ONCE, store it in memory, 
-# and apply it in 1 single paste operation instead of 250 loops!
-@lru_cache(maxsize=1)
-def get_full_watermark_overlay(text: str, width=1000, height=1800):
+# ────────────────────────────────────────────────────────────────────
+
+def apply_repeating_watermark(img, text="AmazingDealsLoots"):
+    base = img.convert("RGBA")
+    w, h = base.size
+    
     current_dir = os.path.dirname(os.path.abspath(__file__))
     font_path = os.path.join(current_dir, "Roboto-Bold.ttf")
+    
     try:
         font = ImageFont.truetype(font_path, 50)
     except Exception as e:
@@ -889,70 +701,43 @@ def get_full_watermark_overlay(text: str, width=1000, height=1800):
         font = ImageFont.load_default()
         
     stamp = PILImage.new("RGBA", (600, 150), (255, 255, 255, 0))
-    ImageDraw.Draw(stamp).text((50, 50), text, fill=(0, 0, 0, 115), font=font)
-    stamp = stamp.rotate(30, expand=1, resample=getattr(PILImage, "BICUBIC", 3))
-
-    # Create the giant overlay
-    overlay = PILImage.new("RGBA", (width, height), (255, 255, 255, 0))
+    stamp_draw = ImageDraw.Draw(stamp)
+    
+    # Text Opacity
+    stamp_draw.text((50, 50), text, fill=(0, 0, 0, 115), font=font)
+    
+    # Rotate the small stamp
+    stamp = stamp.rotate(30, expand=1, resample=PILImage.BICUBIC)
+    
+    overlay = PILImage.new("RGBA", base.size, (255, 255, 255, 0))
     sw, sh = stamp.size
     
-    step_x = max(60, sw - 220)
-    step_y = max(60, sh - 120)
+    step_x = sw - 220  
+    step_y = sh - 120  
     
-    # Tile the stamp onto the overlay (This heavy math only happens ONCE)
-    for y in range(-sh, height, step_y):
+    for y in range(-sh, h, step_y):
         offset = (y // step_y) % 2 * (step_x // 2)
-        for x in range(-sw + offset, width, step_x):
+        for x in range(-sw + offset, w, step_x):
             overlay.paste(stamp, (x, y), stamp)
             
-    return overlay
+    return PILImage.alpha_composite(base, overlay).convert("RGB")
 
-def apply_repeating_watermark(img, text="AmazingDealsLoots"):
-    w, h = img.size
-    
-    # Fetch the pre-rendered full-page overlay instantly from memory
-    overlay = get_full_watermark_overlay(text)
-    
-    # Crop it to exactly match the current deal card's dimensions
-    cropped_overlay = overlay.crop((0, 0, w, h))
-    
-    if img.mode != "RGB":
-        img = img.convert("RGB")
-        
-    # ONE single, lightning-fast paste operation!
-    img.paste(cropped_overlay, (0, 0), cropped_overlay)
-            
-    return img
 
-def _download_image_b64(url, max_side=900):
-    """Downloads and PRE-SHRINKS the image to save massive WeasyPrint RAM/CPU"""
+def _download_image_b64(url):
     try:
         r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-        img = PILImage.open(BytesIO(r.content))
-        img.load()
-        w, h = img.size # keep original dims for aspect logic
-        
-        # Flatten transparency onto white
-        if img.mode in ("RGBA", "LA", "P"):
-            img = img.convert("RGBA")
-            bg = PILImage.new("RGB", img.size, (255, 255, 255))
-            bg.paste(img, mask=img.split()[-1])
-            img = bg
-        else:
-            img = img.convert("RGB")
-            
-        if max(img.size) > max_side:
-            resample_filter = getattr(PILImage, "Resampling", PILImage).LANCZOS if hasattr(PILImage, "Resampling") else PILImage.LANCZOS
-            img.thumbnail((max_side, max_side), resample_filter)
-            
-        out = BytesIO()
-        img.save(out, format="JPEG", quality=90, subsampling=0)
-        return base64.b64encode(out.getvalue()).decode("utf-8"), w, h
+        img_bytes = r.content
+        img = PILImage.open(BytesIO(img_bytes))
+        w, h = img.size
+        b64 = base64.b64encode(img_bytes).decode("utf-8")
+        return b64, w, h
     except Exception:
         return ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/58BAwAI/AL+hc2rNAAAAABJRU5ErkJggg==", 1, 1)
 
+
 def _fmt(n):
     return f"{int(n):,}" if n else "0"
+
 
 def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", template_type="standard", short_title="", reg_price=0):
     img_b64, orig_w, orig_h = _download_image_b64(image_url)
@@ -961,6 +746,7 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", templa
         effective = bd["effective"]
         real_mrp = bd.get("mrp", effective)
         tag_pct = int(((real_mrp - effective) / real_mrp) * 100) if real_mrp > effective else 0
+
         tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
         del_date = tomorrow.strftime('%d %b')
         bought_rnd = random.choice(['100+', '200+', '400+', '500+', '1K+', '2K+', '3K+'])
@@ -998,48 +784,57 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", templa
             total_savings = 0
             if bd["coupon_disc"] > 0: savings_count += 1; total_savings += bd["coupon_disc"]
             if bd.get("best_bank_disc", 0) > 0: savings_count += 1; total_savings += bd["best_bank_disc"]
+            
             if bd.get("coupon_type") == "percent":
                 coupon_display_text = f"{bd['coupon_raw_value']:g}%"
             else:
                 coupon_display_text = f"&#8377;{_fmt(bd['coupon_disc'])}"
 
-            tpl.update(savings_count=savings_count, total_savings_fmt=_fmt(total_savings), coupon_display_text=coupon_display_text)
+            tpl.update(
+                savings_count=savings_count, 
+                total_savings_fmt=_fmt(total_savings),
+                coupon_display_text=coupon_display_text
+            )
             html = AMAZON_DEAL_TEMPLATE.render(**tpl)
 
     try:
-        # 1. WeasyPrint PDF
+        # 1. WeasyPrint generates a perfect PDF in memory
         pdf_bytes = HTML(string=html).write_pdf()
     
-        # 2. PyMuPDF raw pixels (NO png encode/decode round trip)
+        # 2. PyMuPDF opens the PDF bytes and converts the first page to a PNG
         doc = fitz.open("pdf", pdf_bytes)
         try:
             page = doc.load_page(0)
-            pix = page.get_pixmap(dpi=150, alpha=False)
-            img = PILImage.frombytes("RGB", (pix.width, pix.height), pix.samples)
-            w, h = img.size
+            pix = page.get_pixmap(dpi=150) 
+            png_bytes = pix.tobytes("png")
         finally:
-            doc.close() # <-- PLUG THE MEMORY LEAK!
+            doc.close() # Closes doc to fix memory leaks
+    
+        # 3. Load the PNG into Pillow
+        buf_in = BytesIO(png_bytes)
+        img = PILImage.open(buf_in).convert("RGB")
+        w, h = img.size
 
-        # 3. Fast Threshold cropping
+        # 4. Ultra-fast, artifact-proof threshold cropping
         gray = img.convert("L")
         bw = gray.point(lambda x: 0 if x > 250 else 255, '1')
         bbox = bw.getbbox()
-        del gray, bw
 
         if bbox:
             img = img.crop((0, 0, w, min(bbox[3] + 15, h)))
-    
-        # 4. Watermark applied directly to pixels
+            
+        # Apply the fast watermark
         img = apply_repeating_watermark(img, text="AmazingDealsLoots")
-      
-        # 5. Save the cropped image as JPEG to stop Telegram TimedOut errors
+    
+        # 5. Save the cropped image
         buf_out = BytesIO()
-        img.save(buf_out, format="JPEG", quality=92, subsampling=0, optimize=False)
+        # THE MAGIC FIX: Saving as JPEG instantly stops timeouts
+        img.save(buf_out, format="JPEG", quality=90)
         buf_out.seek(0)
         return buf_out
 
     except Exception as e:
-        log.error(f"Render error: {e}", exc_info=True)
+        log.error(f"Render error: {e}")
         return None
 
 
@@ -1068,57 +863,20 @@ def format_caption(title, url, bd, avg_price):
     return "\n".join(lines)
 
 
-# Retry helpers to handle temporary network hiccups and timeouts gracefully
-async def send_photo_retry(msg, buf, caption, keyboard, tries=3):
-    last = None
-    for i in range(tries):
-        try:
-            buf.seek(0)
-            return await msg.reply_photo(
-                photo=buf, caption=caption, parse_mode="HTML",
-                reply_markup=keyboard,
-                read_timeout=90, write_timeout=120, connect_timeout=30
-            )
-        except RetryAfter as e:
-            await asyncio.sleep(e.retry_after + 1)
-            last = e
-        except (TimedOut, NetworkError) as e:
-            log.warning(f"send_photo attempt {i+1} failed: {e}")
-            await asyncio.sleep(2 * (i + 1))
-            last = e
-    raise last
-
-async def edit_media_retry(query, buf, caption, keyboard, tries=3):
-    last = None
-    for i in range(tries):
-        try:
-            buf.seek(0)
-            return await query.edit_message_media(
-                media=InputMediaPhoto(buf, caption=caption, parse_mode="HTML"),
-                reply_markup=keyboard,
-                read_timeout=90, write_timeout=120, connect_timeout=30
-            )
-        except RetryAfter as e:
-            await asyncio.sleep(e.retry_after + 1)
-            last = e
-        except (TimedOut, NetworkError) as e:
-            log.warning(f"edit_media attempt {i+1} failed: {e}")
-            await asyncio.sleep(2 * (i + 1))
-            last = e
-    raise last
-
-
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Send me any Amazon or Flipkart link.\nI'll generate a deal post with price breakdown & offers!")
 
+
 async def cmd_optimized(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_mode = context.user_data.get('default_mode', 'standard')
+    
     if current_mode == 'standard':
         context.user_data['default_mode'] = 'optimized'
         await update.message.reply_text("✅ Default mode set to **Optimized**.\nAll future links will generate the optimized post first. You can still use the inline button to switch manually.", parse_mode="Markdown")
     else:
         context.user_data['default_mode'] = 'standard'
         await update.message.reply_text("✅ Default mode set to **Standard**.\nAll future links will generate the standard post first. You can still use the inline button to switch manually.", parse_mode="Markdown")
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
@@ -1134,8 +892,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status = await msg.reply_text("⏳ Processing...")
 
     try:
-        # NON-BLOCKING URL RESOLVE
-        resolved = await asyncio.to_thread(resolve_url, raw_url)
+        resolved = resolve_url(raw_url)
         mkt, pid, pos = detect_marketplace(resolved)
         if not mkt or not pid:
             await status.edit_text("❌ Couldn't detect product.")
@@ -1152,6 +909,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             api_product_data(pid, pos),
             return_exceptions=True,
         )
+        
         if isinstance(details, Exception): details = {}
         if isinstance(thunder, Exception): thunder = {}
         if isinstance(compare, Exception): compare =[]
@@ -1191,6 +949,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             or 0
         )
         scraped_mrp = _clean_price(scraped.get("mrp")) or 0
+            
         mrp = max(scraped_mrp, api_mrp, price)
         
         avg_p = thunder.get("avg", 0)
@@ -1206,12 +965,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         default_mode = context.user_data.get('default_mode', 'standard')
 
-        # SEMAPHORE: Queue heavy renders so we don't crash
-        async with RENDER_SEM:
-            deal_img = await asyncio.to_thread(
-                generate_deal_image, image_url, bd, scraped.get("bank_offers",[]), 
-                marketplace=mkt, template_type=default_mode, short_title=short_title, reg_price=reg_price
-            )
+        deal_img = await asyncio.to_thread(
+            generate_deal_image, image_url, bd, scraped.get("bank_offers",[]), 
+            marketplace=mkt, template_type=default_mode, short_title=short_title, reg_price=reg_price
+        )
 
         if default_mode == "optimized":
             btn_text = "🖼️ Show Standard Version"
@@ -1223,7 +980,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(btn_text, callback_data=btn_cb)]])
 
         if deal_img:
-            await send_photo_retry(msg, deal_img, caption, keyboard)
+            # Send photo standard, no weird retry loops
+            await msg.reply_photo(photo=deal_img, caption=caption, parse_mode="HTML", reply_markup=keyboard, write_timeout=45)
         else:
             await msg.reply_text(caption, disable_web_page_preview=True, parse_mode="HTML")
 
@@ -1251,30 +1009,36 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(new_text, callback_data=new_data)]])
     
-    async with RENDER_SEM:
-        deal_img = await asyncio.to_thread(
-            generate_deal_image, cache['image_url'], cache['bd'], cache['bank_offers'], 
-            marketplace=cache['mkt'], template_type="optimized" if is_optimized else "standard", 
-            short_title=cache['short_title'], reg_price=cache['reg_price']
-        )
+    deal_img = await asyncio.to_thread(
+        generate_deal_image, cache['image_url'], cache['bd'], cache['bank_offers'], 
+        marketplace=cache['mkt'], template_type="optimized" if is_optimized else "standard", 
+        short_title=cache['short_title'], reg_price=cache['reg_price']
+    )
     
     if deal_img:
-        await edit_media_retry(query, deal_img, cache['caption'], keyboard)
+        await query.edit_message_media(
+            media=InputMediaPhoto(deal_img, caption=cache['caption'], parse_mode="HTML"),
+            reply_markup=keyboard,
+            write_timeout=45
+        )
 
 
 def main():
     if BOT_TOKEN == "YOUR_TOKEN": raise ValueError("Set TELEGRAM_BOT_TOKEN environment variable!")
     
-    # Reverted to the simple, safe builder so it boots up without "Bad Gateway" errors!
+    # Simple, Original Telegram Builder. No connection overrides. No Bad Gateway!
     app = Application.builder().token(BOT_TOKEN).build()
     
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("optimized", cmd_optimized))
     app.add_handler(MessageHandler((filters.TEXT | filters.CAPTION) & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(handle_callback))
+    
     keep_alive()
     log.info("DealBot v7 running...")
+    
     app.run_polling(allowed_updates=Update.ALL_TYPES)
+
 
 if __name__ == "__main__":
     main()
