@@ -15,6 +15,8 @@ import random
 from io import BytesIO
 from urllib.parse import urlparse
 
+import time
+import telegram.error
 import fitz
 from weasyprint import HTML
 import httpx
@@ -1249,44 +1251,66 @@ def main():
     if BOT_TOKEN == "YOUR_TOKEN":
         raise ValueError("Set TELEGRAM_BOT_TOKEN environment variable!")
 
-    # ── THE ACTUAL "Timed out" FIX ──
-    # PTB defaults are 5s read / 5s write — nowhere near enough to upload a
-    # deal card from a throttled free-tier container.
-    request = HTTPXRequest(
-        connection_pool_size=16,
-        connect_timeout=30.0,
-        read_timeout=60.0,
-        write_timeout=120.0,
-        pool_timeout=30.0,
-    )
-    get_updates_request = HTTPXRequest(
-        connection_pool_size=4,
-        connect_timeout=30.0,
-        read_timeout=40.0,
-        write_timeout=30.0,
-        pool_timeout=30.0,
-    )
-
-    app = (
-        Application.builder()
-        .token(BOT_TOKEN)
-        .request(request)
-        .get_updates_request(get_updates_request)
-        .build()
-    )
-
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("optimized", cmd_optimized))
-    app.add_handler(MessageHandler((filters.TEXT | filters.CAPTION) & ~filters.COMMAND,
-                                   handle_message))
-    app.add_handler(CallbackQueryHandler(handle_callback))
-
+    # Start the keep-alive server ONCE before the loop, 
+    # so Flask doesn't crash trying to use the same port twice.
     keep_alive()
-    log.info("DealBot v7.1 running...")
-    # drop_pending_updates: Render free tier restarts often; without this a
-    # backlog of queued links all fire at once and thrash the CPU.
-    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
+    max_retries = 5
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Exactly your existing network settings
+            request = HTTPXRequest(
+                connection_pool_size=16,
+                connect_timeout=30.0,
+                read_timeout=60.0,
+                write_timeout=120.0,
+                pool_timeout=30.0,
+            )
+            get_updates_request = HTTPXRequest(
+                connection_pool_size=4,
+                connect_timeout=30.0,
+                read_timeout=40.0,
+                write_timeout=30.0,
+                pool_timeout=30.0,
+            )
+
+            # Build the app instance
+            app = (
+                Application.builder()
+                .token(BOT_TOKEN)
+                .request(request)
+                .get_updates_request(get_updates_request)
+                .build()
+            )
+
+            # Exactly your existing handlers
+            app.add_handler(CommandHandler("start", cmd_start))
+            app.add_handler(CommandHandler("optimized", cmd_optimized))
+            app.add_handler(MessageHandler((filters.TEXT | filters.CAPTION) & ~filters.COMMAND, handle_message))
+            app.add_handler(CallbackQueryHandler(handle_callback))
+
+            log.info(f"DealBot v7.1 starting... (Attempt {attempt}/{max_retries})")
+
+            # Start polling. (With drop_pending_updates=True just like you had)
+            app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+            
+            # If run_polling exits cleanly, exit the loop
+            break
+
+        except telegram.error.NetworkError as e:
+            log.warning(f"Network error during startup (Attempt {attempt}/{max_retries}): {e}")
+            if attempt < max_retries:
+                log.info("Waiting 5 seconds for Render's network to stabilize before rebuilding...")
+                time.sleep(5) 
+            else:
+                log.error("Failed to connect to Telegram after 5 attempts. Aborting.")
+                raise e
+        except Exception as e:
+            log.error(f"Unexpected startup error (Attempt {attempt}/{max_retries}): {e}")
+            if attempt < max_retries:
+                time.sleep(5)
+            else:
+                raise e
 
 if __name__ == "__main__":
     main()
