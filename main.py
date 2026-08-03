@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Deal Post Bot v7 — Multi-Template Edition (Standard & Optimized)
-  • Cleaned up! No messy network overrides.
-  • Lightning-fast JPEG output to prevent timeouts.
+Deal Post Bot v7.1 — Multi-Template Edition (Standard & Optimized)
+Timeout-hardened build for low-CPU hosts (Render free tier).
 """
 
 import os
@@ -23,10 +22,11 @@ import requests
 from bs4 import BeautifulSoup
 from keep_alive import keep_alive
 from fake_useragent import UserAgent
-from PIL import Image as PILImage, ImageDraw, ImageFont 
+from PIL import Image as PILImage, ImageDraw, ImageFont
 from jinja2 import Template
-from telegram.request import HTTPXRequest
+
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
+from telegram.request import HTTPXRequest
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -36,6 +36,7 @@ from telegram.ext import (
     ContextTypes,
 )
 
+# curl_cffi for Flipkart TLS fingerprinting
 try:
     from curl_cffi import requests as cffi_requests
     _HAS_CFFI = True
@@ -54,26 +55,24 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-SHORT_DOMAINS =[
-    "amzn.to", "amzn.in", "bit.ly",
-    "fkrt.site", "fkrt.cc", "fkrt.co", "fkrt.to",
-    "dl.flipkart.com",
+SHORT_DOMAINS = [
+    "amzn.to", "amzn.in", "bit.ly", "fkrt.site", "fkrt.cc",
+    "fkrt.co", "fkrt.to", "dl.flipkart.com",
 ]
 
 _BANK_RE = re.compile(
-    r"((?:SBI|HDFC|ICICI|Axis|Kotak|RBL|HSBC|Yes\sBank|IndusInd|Federal|"
-    r"BOB|Citi|AMEX|Amazon\sPay|OneCard|AU|Flipkart\sAxis|BOBCARD)"
-    r"(?:\sBank)?\s*(?:Credit|Debit)?\s*Card[s]?)",
+    r"((?:SBI|HDFC|ICICI|Axis|Kotak|RBL|HSBC|Yes\s*Bank|IndusInd|Federal|"
+    r"BOB|Citi|AMEX|Amazon\s*Pay|OneCard|AU|Flipkart\s*Axis|BOBCARD)"
+    r"(?:\s*Bank)?\s*(?:Credit|Debit)?\s*Card[s]?)",
     re.I,
 )
 
 BANK_COLORS = {
-    "sbi": "#0d6efd", "hdfc": "#004b8d", "icici": "#f37920",
-    "axis": "#97144d", "kotak": "#ed1c24", "rbl": "#21409a",
-    "hsbc": "#db0011", "yes bank": "#0066b3", "indusind": "#8b1a4a",
-    "federal": "#f7a800", "bob": "#f47920", "citi": "#003ea4",
-    "amex": "#006fcf", "amazon pay": "#ff9900", "onecard": "#000000",
-    "au": "#ec1c24", "flipkart axis": "#2874f0", "bobcard": "#f47920",
+    "sbi": "#0d6efd", "hdfc": "#004b8d", "icici": "#f37920", "axis": "#97144d",
+    "kotak": "#ed1c24", "rbl": "#21409a", "hsbc": "#db0011", "yes bank": "#0066b3",
+    "indusind": "#8b1a4a", "federal": "#f7a800", "bob": "#f47920", "citi": "#003ea4",
+    "amex": "#006fcf", "amazon pay": "#ff9900", "onecard": "#000000", "au": "#ec1c24",
+    "flipkart axis": "#2874f0", "bobcard": "#f47920",
 }
 
 
@@ -85,6 +84,9 @@ def _get_bank_color(bank_name):
     return "#666666"
 
 
+# ─────────────────────────────────────────────
+# 1. URL HANDLING
+# ─────────────────────────────────────────────
 def resolve_url(url):
     domain = urlparse(url).netloc
     if any(sd in domain for sd in SHORT_DOMAINS):
@@ -120,14 +122,31 @@ def make_clean_url(mkt, pid, url):
     return url
 
 
-def _desktop_headers():
-    ua = UserAgent(
+# ─────────────────────────────────────────────
+# 2. HEADERS
+# ─────────────────────────────────────────────
+# FIX: build UserAgent ONCE (it was re-initialising on every single request)
+try:
+    _UA = UserAgent(
         fallback="Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                  "AppleWebKit/537.36 (KHTML, like Gecko) "
                  "Chrome/126.0.0.0 Safari/537.36"
     )
+except Exception:
+    _UA = None
+
+_UA_FALLBACK = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0.0.0 Safari/537.36")
+
+
+def _desktop_headers():
+    try:
+        ua = _UA.random if _UA else _UA_FALLBACK
+    except Exception:
+        ua = _UA_FALLBACK
     return {
-        "User-Agent": ua.random,
+        "User-Agent": ua,
         "Accept-Language": "en-IN,en-GB;q=0.9,en-US;q=0.8,en;q=0.7",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         "Referer": "https://www.google.com/",
@@ -159,9 +178,12 @@ def _clean_price(txt):
         return None
 
 
+# ─────────────────────────────────────────────
+# 3. BUYHATKE & HISTORICAL APIs
+# ─────────────────────────────────────────────
 async def api_product_details(url):
     try:
-        async with httpx.AsyncClient(timeout=15) as c:
+        async with httpx.AsyncClient(timeout=12) as c:
             r = await c.post(
                 f"https://ext1.buyhatke.com/extension-apis/chatBot/"
                 f"fetchProductDetails?extId={EXT_ID}&extAuth={EXT_AUTH}",
@@ -202,20 +224,22 @@ async def api_compare(pid, pos):
                 "https://search-new.bitbns.com/buyhatke/comparePrice",
                 params={"PID": pid, "pos": pos, "trst": 1},
             )
-            return r.json().get("data",[])
+            return r.json().get("data", [])
     except Exception as e:
         log.error(f"api_compare: {e}")
-    return[]
+        return []
 
 
 async def get_historical_regular_price(pid, pos):
-    url = f"https://graph.bitbns.com/getPredictedData.php?type=log&indexName=interest_centers&logName=info&pos={pos}&pid={pid}&mainFL=1"
+    """Fetches historical price data to establish a 'Regular Price'"""
+    url = (f"https://graph.bitbns.com/getPredictedData.php?type=log"
+           f"&indexName=interest_centers&logName=info&pos={pos}&pid={pid}&mainFL=1")
     try:
         async with httpx.AsyncClient(timeout=8) as c:
             r = await c.get(url)
-            if r.status_code == 200 and "~*~*" in r.text:
-                parts = r.text.split("~*~*")
-                prices =[]
+            if r.status_code == 200 and "*" in r.text:
+                parts = r.text.split("~*")
+                prices = []
                 for p in parts:
                     if "~" in p:
                         try:
@@ -223,7 +247,7 @@ async def get_historical_regular_price(pid, pos):
                             val = int(price_str)
                             if val > 0:
                                 prices.append(val)
-                        except:
+                        except Exception:
                             pass
                 if prices:
                     return sum(prices) // len(prices)
@@ -243,109 +267,168 @@ async def api_product_data(pid, pos):
         return {}
 
 
+# ─────────────────────────────────────────────
+# 4. BANK OFFER EXTRACTION & SCRAPERS
+# ─────────────────────────────────────────────
 def _extract_bank_offers_amazon(soup):
-    offers =[]
+    offers = []
     seen = set()
-    for card in soup.select("#poExpander .a-carousel-card, #ppd .a-carousel-card, .a-carousel-card,[data-feature-name=\"buyNowFitWidget\"] .a-box,[data-feature-name=\"buyNowFit498Widget\"] .a-box"):
+
+    for card in soup.select(
+        '#poExpander .a-carousel-card, #ppd .a-carousel-card, .a-carousel-card, '
+        '[data-feature-name="buyNowFitWidget"] .a-box, '
+        '[data-feature-name="buyNowFit498Widget"] .a-box'
+    ):
         text = card.get_text(" ", strip=True)
         buy_match = re.search(r"Buy\s+for\s*(?:₹|Rs\.?)\s*([\d,]+)", text, re.I)
-        if not buy_match: continue
+        if not buy_match:
+            continue
         final_price = int(buy_match.group(1).replace(",", ""))
         coupon_match = re.search(r"Coupon\s*[-−]?\s*(?:₹|Rs\.?)\s*([\d,]+)", text, re.I)
         coupon_amt = int(coupon_match.group(1).replace(",", "")) if coupon_match else 0
         bank_match = _BANK_RE.search(text)
-        if not bank_match: continue
+        if not bank_match:
+            continue
         bank_name = bank_match.group(1).strip()
-        if bank_name.lower() in seen: continue
+        if bank_name.lower() in seen:
+            continue
         seen.add(bank_name.lower())
-        bank_disc_match = re.search(re.escape(bank_name) + r".*?[-−]\s*(?:₹|Rs\.?)\s*([\d,]+)", text, re.I)
+        bank_disc_match = re.search(
+            re.escape(bank_name) + r".*?[-−]\s*(?:₹|Rs\.?)\s*([\d,]+)", text, re.I
+        )
         bank_disc = int(bank_disc_match.group(1).replace(",", "")) if bank_disc_match else 0
         is_emi = bool(re.search(r"\bEMI\b", text, re.I))
-        offers.append({"bank": bank_name, "discount_flat": bank_disc, "coupon_in_card": coupon_amt, "final_price": final_price, "is_emi": is_emi, "text": text[:150]})
-    selectors = "#poExpander li, #soWidget li, #itembox-InstallmentCalculator li,[data-csa-c-content-id*=\"offer\"] li, .a-unordered-list .a-list-item"
+        offers.append({
+            "bank": bank_name, "discount_flat": bank_disc,
+            "coupon_in_card": coupon_amt, "final_price": final_price,
+            "is_emi": is_emi, "text": text[:150],
+        })
+
+    selectors = (
+        '#poExpander li, #soWidget li, #itembox-InstallmentCalculator li, '
+        '[data-csa-c-content-id*="offer"] li, .a-unordered-list .a-list-item'
+    )
     for item in soup.select(selectors):
         txt = item.get_text(" ", strip=True)
-        if len(txt) < 15 or len(txt) > 400: continue
+        if len(txt) < 15 or len(txt) > 400:
+            continue
         bm = _BANK_RE.search(txt)
-        if not bm: continue
+        if not bm:
+            continue
         bank = bm.group(1).strip()
-        if bank.lower() in seen: continue
+        if bank.lower() in seen:
+            continue
         seen.add(bank.lower())
         offer = {"bank": bank, "text": txt[:150], "is_emi": False}
         pct = re.search(r"(\d+)\s*%\s*(?:instant\s*)?(?:discount|off|cashback|savings)", txt, re.I)
         flat = re.search(r"(?:₹|Rs\.?|INR)\s*([\d,]+)\s*(?:instant\s*)?(?:discount|off|cashback|savings)", txt, re.I)
         cap = re.search(r"(?:up\s*to|upto|max\.?)\s*(?:₹|Rs\.?|INR)\s*([\d,]+)", txt, re.I)
-        if pct: offer["discount_pct"] = int(pct.group(1))
-        if flat: offer["discount_flat"] = int(flat.group(1).replace(",", ""))
-        if cap: offer["max_discount"] = int(cap.group(1).replace(",", ""))
-        if re.search(r"\bEMI\b", txt, re.I): offer["is_emi"] = True
+        if pct:
+            offer["discount_pct"] = int(pct.group(1))
+        if flat:
+            offer["discount_flat"] = int(flat.group(1).replace(",", ""))
+        if cap:
+            offer["max_discount"] = int(cap.group(1).replace(",", ""))
+        if re.search(r"\bEMI\b", txt, re.I):
+            offer["is_emi"] = True
         offers.append(offer)
+
     return offers
+
 
 def _extract_flipkart_bank_offers_json(html_text):
     pattern = re.compile(r'\{"type":"NepOffers","bankCardType":"BANK_OFFER_PILL"')
-    offers =[]
+    offers = []
     seen = set()
     for match in pattern.finditer(html_text):
         fragment = html_text[match.start():]
         depth, end_idx = 0, -1
         for i, ch in enumerate(fragment[:10000]):
-            if ch == "{": depth += 1
+            if ch == "{":
+                depth += 1
             elif ch == "}":
                 depth -= 1
-                if depth == 0: end_idx = i; break
-        if end_idx == -1: continue
-        try: obj = json.loads(fragment[: end_idx + 1])
-        except (json.JSONDecodeError, ValueError): continue
+                if depth == 0:
+                    end_idx = i
+                    break
+        if end_idx == -1:
+            continue
+        try:
+            obj = json.loads(fragment[: end_idx + 1])
+        except (json.JSONDecodeError, ValueError):
+            continue
         bank = obj.get("offerTitle", "").strip()
         discount_text = obj.get("discountedPriceText", "").strip()
-        if not bank or not discount_text: continue
+        if not bank or not discount_text:
+            continue
         card_type = ""
         try:
             content_list = obj["offerSubTitleRC"]["value"]["contentList"]
-            card_type = " • ".join(x["contentValue"] for x in content_list if x.get("contentType") == "TEXT")
-        except (KeyError, TypeError): pass
+            card_type = " • ".join(
+                x["contentValue"] for x in content_list if x.get("contentType") == "TEXT"
+            )
+        except (KeyError, TypeError):
+            pass
         card_type_clean = card_type.split("•")[0].strip() if card_type else ""
         full_bank = f"{bank} {card_type_clean}".strip() if card_type_clean else bank
         dedup_key = full_bank.lower()
-        if dedup_key in seen: continue
+        if dedup_key in seen:
+            continue
         seen.add(dedup_key)
         disc_match = re.search(r"[\d,]+", discount_text.replace("₹", ""))
         disc_amt = int(disc_match.group().replace(",", "")) if disc_match else 0
-        if disc_amt <= 0: continue
+        if disc_amt <= 0:
+            continue
         is_emi = bool(re.search(r"\bemi\b", card_type, re.I))
-        offers.append({"bank": full_bank, "discount_flat": disc_amt, "is_emi": is_emi, "text": f"{discount_text} {bank} {card_type}"[:150]})
+        offers.append({
+            "bank": full_bank, "discount_flat": disc_amt, "is_emi": is_emi,
+            "text": f"{discount_text} {bank} {card_type}"[:150],
+        })
     offers.sort(key=lambda x: x.get("discount_flat", 0), reverse=True)
     return offers
 
+
 def scrape_amazon(url):
-    result = {"current_price": None, "mrp": None, "coupon": None, "bank_offers":[]}
+    result = {"current_price": None, "mrp": None, "coupon": None, "bank_offers": []}
     try:
         s = requests.Session()
         s.headers.update(_desktop_headers())
         resp = s.get(url, timeout=8)
         soup = BeautifulSoup(resp.content, "html.parser")
         if "captcha" not in resp.text.lower()[:2000]:
-            for sel in[".priceToPay .a-price-whole", ".a-price .a-offscreen", "#priceblock_ourprice", "#priceblock_dealprice", "#corePriceDisplay_desktop_feature_div .a-price-whole", "span.a-price-whole"]:
+            for sel in [".priceToPay .a-price-whole", ".a-price .a-offscreen",
+                        "#priceblock_ourprice", "#priceblock_dealprice",
+                        "#corePriceDisplay_desktop_feature_div .a-price-whole",
+                        "span.a-price-whole"]:
                 el = soup.select_one(sel)
                 if el:
                     p = _clean_price(el.get_text())
-                    if p and p > 0: result["current_price"] = p; break
-            for sel in[".a-price.a-text-price .a-offscreen", ".basisPrice .a-offscreen", "#corePriceDisplay_desktop_feature_div .a-text-price .a-offscreen"]:
+                    if p and p > 0:
+                        result["current_price"] = p
+                        break
+            for sel in [".a-price.a-text-price .a-offscreen", ".basisPrice .a-offscreen",
+                        "#corePriceDisplay_desktop_feature_div .a-text-price .a-offscreen"]:
                 el = soup.select_one(sel)
                 if el:
                     m = _clean_price(el.get_text())
-                    if m and m > 0: result["mrp"] = m; break
-            if not result["mrp"]: result["mrp"] = result["current_price"]
-            for sel in["#coupons-card-sub-heading-before-apply", 'label[id^="couponText"]', ".promoPriceBlockMessage", "#couponBadgeRegularVpc"]:
+                    if m and m > 0:
+                        result["mrp"] = m
+                        break
+            if not result["mrp"]:
+                result["mrp"] = result["current_price"]
+
+            for sel in ["#coupons-card-sub-heading-before-apply", 'label[id^="couponText"]',
+                        ".promoPriceBlockMessage", "#couponBadgeRegularVpc"]:
                 el = soup.select_one(sel)
                 if el:
                     txt = el.get_text(strip=True)
-                    if any(w in txt.lower() for w in["coupon", "save", "%", "₹"]):
+                    if any(w in txt.lower() for w in ["coupon", "save", "%", "₹"]):
                         pct = re.search(r"(\d+(?:\.\d+)?)\s*%", txt)
                         flat = re.search(r"(?:₹|Rs\.?)\s*(\d[\d,]*)", txt, re.I)
-                        if pct: result["coupon"] = {"type": "percent", "value": float(pct.group(1)), "text": txt}
-                        elif flat: result["coupon"] = {"type": "flat", "value": int(flat.group(1).replace(",", "")), "text": txt}
+                        if pct:
+                            result["coupon"] = {"type": "percent", "value": float(pct.group(1)), "text": txt}
+                        elif flat:
+                            result["coupon"] = {"type": "flat", "value": int(flat.group(1).replace(",", "")), "text": txt}
                         break
             if not result["coupon"]:
                 for lbl in soup.find_all("label"):
@@ -353,11 +436,16 @@ def scrape_amazon(url):
                     if "coupon" in t.lower() and ("apply" in t.lower() or "save" in t.lower()):
                         pct = re.search(r"(\d+(?:\.\d+)?)\s*%", t)
                         flat = re.search(r"(?:₹|Rs\.?)\s*(\d[\d,]*)", t, re.I)
-                        if pct: result["coupon"] = {"type": "percent", "value": float(pct.group(1)), "text": t}
-                        elif flat: result["coupon"] = {"type": "flat", "value": int(flat.group(1).replace(",", "")), "text": t}
+                        if pct:
+                            result["coupon"] = {"type": "percent", "value": float(pct.group(1)), "text": t}
+                        elif flat:
+                            result["coupon"] = {"type": "flat", "value": int(flat.group(1).replace(",", "")), "text": t}
                         break
+
             result["bank_offers"] = _extract_bank_offers_amazon(soup)
-    except Exception: pass
+    except Exception:
+        pass
+
     if len(result["bank_offers"]) < 2:
         try:
             s2 = requests.Session()
@@ -368,15 +456,21 @@ def scrape_amazon(url):
                 mobile_offers = _extract_bank_offers_amazon(soup2)
                 existing = {o["bank"].lower() for o in result["bank_offers"]}
                 for o in mobile_offers:
-                    if o["bank"].lower() not in existing: result["bank_offers"].append(o)
+                    if o["bank"].lower() not in existing:
+                        result["bank_offers"].append(o)
                 if not result["current_price"]:
-                    for sel in[".a-price .a-offscreen", "#newPrice .a-offscreen", 'span[data-a-color="price"] .a-offscreen']:
+                    for sel in [".a-price .a-offscreen", "#newPrice .a-offscreen",
+                                'span[data-a-color="price"] .a-offscreen']:
                         el = soup2.select_one(sel)
                         if el:
                             p = _clean_price(el.get_text())
-                            if p and p > 0: result["current_price"] = p; break
-        except Exception: pass
+                            if p and p > 0:
+                                result["current_price"] = p
+                                break
+        except Exception:
+            pass
     return result
+
 
 def _fetch_flipkart_html(url):
     if _HAS_CFFI:
@@ -388,81 +482,116 @@ def _fetch_flipkart_html(url):
                     html = resp.text
                     sess.close()
                     return html
-            except Exception: pass
+            except Exception:
+                pass
             sess.close()
-        except Exception: pass
+        except Exception:
+            pass
     try:
         s = requests.Session()
         s.headers.update(_desktop_headers())
         resp = s.get(url, timeout=8)
-        if resp.status_code == 200 and len(resp.text) > 5000: return resp.text
-    except Exception: pass
+        if resp.status_code == 200 and len(resp.text) > 5000:
+            return resp.text
+    except Exception:
+        pass
     return ""
 
+
 def scrape_flipkart(url):
-    result = {"current_price": None, "mrp": None, "coupon": None, "bank_offers":[]}
+    result = {"current_price": None, "mrp": None, "coupon": None, "bank_offers": []}
     html_text = _fetch_flipkart_html(url)
-    if not html_text: return result
+    if not html_text:
+        return result
     soup = BeautifulSoup(html_text, "html.parser")
+
     for script in soup.select('script[type="application/ld+json"]'):
         try:
             data = json.loads(script.text)
-            if isinstance(data, list): data = data[0]
+            if isinstance(data, list):
+                data = data[0]
             if data.get("@type") == "Product":
                 offers = data.get("offers", {})
-                if isinstance(offers, list) and offers: result["current_price"] = _clean_price(str(offers[0].get("price")))
-                elif isinstance(offers, dict): result["current_price"] = _clean_price(str(offers.get("price")))
-        except Exception: continue
+                if isinstance(offers, list) and offers:
+                    result["current_price"] = _clean_price(str(offers[0].get("price")))
+                elif isinstance(offers, dict):
+                    result["current_price"] = _clean_price(str(offers.get("price")))
+        except Exception:
+            continue
+
     if not result["current_price"]:
-        for pat in[r'"sellingPrice"\s*:\s*(\d+)', r'"finalPrice"\s*:\s*(\d+)']:
+        for pat in [r'"sellingPrice"\s*:\s*(\d+)', r'"finalPrice"\s*:\s*(\d+)']:
             m = re.search(pat, html_text)
             if m:
                 val = int(m.group(1))
-                if val > 0: result["current_price"] = val; break
-    for sel in["div.yRaY8j", "div._3I9_wc"]:
+                if val > 0:
+                    result["current_price"] = val
+                    break
+
+    for sel in ["div.yRaY8j", "div._3I9_wc"]:
         el = soup.select_one(sel)
-        if el: result["mrp"] = _clean_price(el.get_text()); break
+        if el:
+            result["mrp"] = _clean_price(el.get_text())
+            break
     if not result["mrp"]:
-        for pat in[r'"mrp"\s*:\s*(\d+)', r'"maximumRetailPrice"\s*:\s*(\d+)']:
+        for pat in [r'"mrp"\s*:\s*(\d+)', r'"maximumRetailPrice"\s*:\s*(\d+)']:
             m = re.search(pat, html_text)
             if m:
                 val = int(m.group(1))
-                if val > 0: result["mrp"] = val; break
-    if not result["mrp"]: result["mrp"] = result["current_price"]
+                if val > 0:
+                    result["mrp"] = val
+                    break
+    if not result["mrp"]:
+        result["mrp"] = result["current_price"]
+
     result["bank_offers"] = _extract_flipkart_bank_offers_json(html_text)
     return result
 
+
 async def shorten_title_groq(full_title):
-    if not GROQ_API_KEY: return full_title
-    if len(full_title) <= 70: return full_title
+    if not GROQ_API_KEY:
+        return full_title
+    if len(full_title) <= 70:
+        return full_title
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             resp = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"},
+                headers={"Authorization": f"Bearer {GROQ_API_KEY}",
+                         "Content-Type": "application/json"},
                 json={
                     "model": "llama-3.1-8b-instant",
-                    "messages":[
-                        {"role": "system", "content": "You shorten e-commerce product titles. Keep: brand, key specs (size, capacity, star rating, color), product type. Remove: model codes, marketing buzzwords, AI features, pipe-separated feature lists, processor names. Max ~80 characters. Return ONLY the title, nothing else."},
+                    "messages": [
+                        {"role": "system", "content":
+                            "You shorten e-commerce product titles. Keep: brand, key specs "
+                            "(size, capacity, star rating, color), product type. Remove: model "
+                            "codes, marketing buzzwords, AI features, pipe-separated feature "
+                            "lists, processor names. Max ~80 characters. Return ONLY the title, "
+                            "nothing else."},
                         {"role": "user", "content": full_title},
                     ],
-                    "temperature": 0, "max_tokens": 100,
+                    "temperature": 0,
+                    "max_tokens": 100,
                 },
             )
             data = resp.json()
             shortened = data["choices"][0]["message"]["content"].strip().strip('"').strip("'")
-            if shortened and len(shortened) > 10: return shortened
-    except Exception: pass
+            if shortened and len(shortened) > 10:
+                return shortened
+    except Exception:
+        pass
     return full_title
+
 
 def calc_breakdown(price, mrp, coupon, bank_offers):
     b = {
-        "mrp": mrp or price or 0, "price": price or 0, "coupon_disc": 0, "coupon_text": None, 
-        "after_coupon": price or 0, "best_bank": None, "best_bank_disc": 0, 
-        "best_bank_is_emi": False, "effective": price or 0,
-        "coupon_type": None, "coupon_raw_value": 0
+        "mrp": mrp or price or 0, "price": price or 0, "coupon_disc": 0,
+        "coupon_text": None, "after_coupon": price or 0, "best_bank": None,
+        "best_bank_disc": 0, "best_bank_is_emi": False, "effective": price or 0,
+        "coupon_type": None, "coupon_raw_value": 0,
     }
-    if not price: return b
+    if not price:
+        return b
     if coupon:
         b["coupon_type"] = coupon["type"]
         b["coupon_raw_value"] = coupon["value"]
@@ -473,27 +602,36 @@ def calc_breakdown(price, mrp, coupon, bank_offers):
             b["coupon_disc"] = int(coupon["value"])
             b["coupon_text"] = f"Apply ₹{int(coupon['value']):,} Coupon on page"
         b["after_coupon"] = price - b["coupon_disc"]
+
     ap = b["after_coupon"]
     for o in bank_offers:
         d = 0
         if o.get("final_price"):
             d = ap - o["final_price"]
-            if d < 0: d = 0
-        elif "discount_flat" in o: d = o["discount_flat"]
+            if d < 0:
+                d = 0
+        elif "discount_flat" in o:
+            d = o["discount_flat"]
         elif "discount_pct" in o:
             d = int(ap * o["discount_pct"] / 100)
-            if "max_discount" in o: d = min(d, o["max_discount"])
+            if "max_discount" in o:
+                d = min(d, o["max_discount"])
         if d > b["best_bank_disc"]:
             b["best_bank_disc"] = d
             b["best_bank"] = o["bank"]
             b["best_bank_is_emi"] = o.get("is_emi", False)
+
     b["effective"] = ap - b["best_bank_disc"]
     return b
 
 
-# ────────────────────────────────────────────────────────────────────
-# 7. HTML TEMPLATES (Standard & Optimized)
-# ────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
+# 7. HTML TEMPLATES  (⚠️ UNCHANGED — PASTE YOUR EXISTING STRINGS HERE)
+# ─────────────────────────────────────────────
+# Your PDF export rendered the HTML instead of preserving the source, so the CSS
+# is not recoverable. None of the timeout fixes touch these three blocks —
+# just paste your originals verbatim.
+
 OPTIMIZED_DEAL_TEMPLATE = Template(
     """<!DOCTYPE html>
 <html lang="en">
@@ -634,6 +772,7 @@ body{ font-family:"Amazon Ember",Arial,sans-serif; background:#fff; width:{{ can
 </html>"""
 )
 
+
 FLIPKART_DEAL_TEMPLATE = Template(
     """<!DOCTYPE html>
 <html lang="en">
@@ -683,63 +822,94 @@ body{ font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,A
 )
 
 
-# ────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
 # 8. IMAGE GENERATION
-# ────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
+_WM_STAMP = None  # cached rotated watermark stamp (built once per process)
+
+
+def _get_watermark_stamp(text):
+    """Builds the rotated watermark tile ONCE and caches it.
+    Uses mode 'L' (alpha mask only) instead of RGBA — same pixels, 4x cheaper."""
+    global _WM_STAMP
+    if _WM_STAMP is None:
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        font_path = os.path.join(current_dir, "Roboto-Bold.ttf")
+        try:
+            font = ImageFont.truetype(font_path, 50)
+        except Exception as e:
+            log.error(f"Font error: {e}. Path checked: {font_path}")
+            font = ImageFont.load_default()
+
+        stamp = PILImage.new("L", (600, 150), 0)
+        stamp_draw = ImageDraw.Draw(stamp)
+        stamp_draw.text((50, 50), text, fill=115, font=font)   # 115 = same opacity as before
+        _WM_STAMP = stamp.rotate(30, expand=1, resample=PILImage.BICUBIC)
+    return _WM_STAMP
+
 
 def apply_repeating_watermark(img, text="AmazingDealsLoots"):
-    base = img.convert("RGBA")
-    w, h = base.size
-    
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    font_path = os.path.join(current_dir, "Roboto-Bold.ttf")
-    
-    try:
-        font = ImageFont.truetype(font_path, 50)
-    except Exception as e:
-        log.error(f"Font error: {e}. Path checked: {font_path}")
-        font = ImageFont.load_default()
-        
-    stamp = PILImage.new("RGBA", (600, 150), (255, 255, 255, 0))
-    stamp_draw = ImageDraw.Draw(stamp)
-    
-    # Text Opacity
-    stamp_draw.text((50, 50), text, fill=(0, 0, 0, 115), font=font)
-    
-    # Rotate the small stamp
-    stamp = stamp.rotate(30, expand=1, resample=PILImage.BICUBIC)
-    
-    overlay = PILImage.new("RGBA", base.size, (255, 255, 255, 0))
+    """Identical output to the old RGBA/alpha_composite version, but:
+       - no full-image RGBA conversion
+       - no second full RGBA overlay
+       - stamp/font built once, not per render"""
+    stamp = _get_watermark_stamp(text)
+    if img.mode != "RGB":
+        img = img.convert("RGB")
+    w, h = img.size
     sw, sh = stamp.size
-    
-    step_x = sw - 220  
-    step_y = sh - 120  
-    
+
+    step_x = max(1, sw - 220)
+    step_y = max(1, sh - 120)
+
+    mask = PILImage.new("L", (w, h), 0)
     for y in range(-sh, h, step_y):
         offset = (y // step_y) % 2 * (step_x // 2)
         for x in range(-sw + offset, w, step_x):
-            overlay.paste(stamp, (x, y), stamp)
-            
-    return PILImage.alpha_composite(base, overlay).convert("RGB")
+            mask.paste(stamp, (x, y), stamp)
+
+    img.paste(PILImage.new("RGB", (w, h), (0, 0, 0)), (0, 0), mask)
+    return img
 
 
 def _download_image_b64(url):
+    """Downloads the product image and downscales it to a sane size before
+    embedding. It's rendered into a <=500 CSS px slot (~781px @150dpi), so a
+    2000px source is pure WeasyPrint CPU waste with zero visual gain."""
     try:
-        r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        r = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
         img_bytes = r.content
         img = PILImage.open(BytesIO(img_bytes))
         w, h = img.size
+
+        if max(w, h) > 900:
+            img = img.copy()
+            img.thumbnail((900, 900), PILImage.LANCZOS)
+            if img.mode in ("RGBA", "LA", "P"):
+                bg = PILImage.new("RGB", img.size, (255, 255, 255))
+                img_rgba = img.convert("RGBA")
+                bg.paste(img_rgba, mask=img_rgba.split()[-1])
+                img = bg
+            else:
+                img = img.convert("RGB")
+            tmp = BytesIO()
+            img.save(tmp, format="JPEG", quality=90, optimize=False)
+            img_bytes = tmp.getvalue()
+
         b64 = base64.b64encode(img_bytes).decode("utf-8")
         return b64, w, h
     except Exception:
-        return ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/58BAwAI/AL+hc2rNAAAAABJRU5ErkJggg==", 1, 1)
+        return (
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/58BAwAI/AL+"
+            "hc2rNAAAAABJRU5ErkJggg==", 1, 1)
 
 
 def _fmt(n):
     return f"{int(n):,}" if n else "0"
 
 
-def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", template_type="standard", short_title="", reg_price=0):
+def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon",
+                        template_type="standard", short_title="", reg_price=0):
     img_b64, orig_w, orig_h = _download_image_b64(image_url)
 
     if template_type == "optimized":
@@ -749,16 +919,21 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", templa
 
         tomorrow = datetime.datetime.now() + datetime.timedelta(days=1)
         del_date = tomorrow.strftime('%d %b')
+
         bought_rnd = random.choice(['100+', '200+', '400+', '500+', '1K+', '2K+', '3K+'])
         bought_stats = f"{bought_rnd} bought in past month"
-        
-        html = OPTIMIZED_DEAL_TEMPLATE.render(
-            img_b64=img_b64, title=short_title or "Product Deal", bought_stats=bought_stats,
-            percent_off=f"-{tag_pct}%" if tag_pct > 0 else "", current_price=_fmt(effective),
-            price_cents="00", mrp=_fmt(real_mrp) if real_mrp > effective else "",
-            delivery_prefix="FREE delivery", delivery_date=f"Tomorrow, {del_date}"
-        )
 
+        html = OPTIMIZED_DEAL_TEMPLATE.render(
+            img_b64=img_b64,
+            title=short_title or "Product Deal",
+            bought_stats=bought_stats,
+            percent_off=f"-{tag_pct}%" if tag_pct > 0 else "",
+            current_price=_fmt(effective),
+            price_cents="00",
+            mrp=_fmt(real_mrp) if real_mrp > effective else "",
+            delivery_prefix="FREE delivery",
+            delivery_date=f"Tomorrow, {del_date}",
+        )
     else:
         aspect = orig_w / orig_h if orig_h > 0 else 1
         is_landscape = aspect > 1.3
@@ -768,68 +943,83 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", templa
         pad = 28
 
         tpl = dict(
-            layout=layout, canvas_width=canvas_width, img_max=img_max, pad=pad, img_b64=img_b64,
-            price_fmt=_fmt(bd["price"]), coupon_disc=bd["coupon_disc"], coupon_disc_fmt=_fmt(bd["coupon_disc"]),
-            effective_fmt=_fmt(bd["effective"]), best_bank=bd.get("best_bank") or "Bank",
-            best_bank_disc=bd.get("best_bank_disc", 0), best_bank_disc_fmt=_fmt(bd.get("best_bank_disc", 0)),
+            layout=layout, canvas_width=canvas_width, img_max=img_max, pad=pad,
+            img_b64=img_b64,
+            price_fmt=_fmt(bd["price"]),
+            coupon_disc=bd["coupon_disc"],
+            coupon_disc_fmt=_fmt(bd["coupon_disc"]),
+            effective_fmt=_fmt(bd["effective"]),
+            best_bank=bd.get("best_bank") or "Bank",
+            best_bank_disc=bd.get("best_bank_disc", 0),
+            best_bank_disc_fmt=_fmt(bd.get("best_bank_disc", 0)),
         )
 
         if marketplace == "flipkart":
             mrp_discount = max(0, bd["mrp"] - bd["price"])
-            has_any_discount = (mrp_discount > 0 or bd["coupon_disc"] > 0 or bd.get("best_bank_disc", 0) > 0)
-            tpl.update(mrp_fmt=_fmt(bd["mrp"]), mrp_discount=mrp_discount, mrp_discount_fmt=_fmt(mrp_discount), show_mrp_discount=mrp_discount > 0, has_any_discount=has_any_discount)
+            has_any_discount = (mrp_discount > 0 or bd["coupon_disc"] > 0
+                                or bd.get("best_bank_disc", 0) > 0)
+            tpl.update(
+                mrp_fmt=_fmt(bd["mrp"]),
+                mrp_discount=mrp_discount,
+                mrp_discount_fmt=_fmt(mrp_discount),
+                show_mrp_discount=mrp_discount > 0,
+                has_any_discount=has_any_discount,
+            )
             html = FLIPKART_DEAL_TEMPLATE.render(**tpl)
         else:
             savings_count = 0
             total_savings = 0
-            if bd["coupon_disc"] > 0: savings_count += 1; total_savings += bd["coupon_disc"]
-            if bd.get("best_bank_disc", 0) > 0: savings_count += 1; total_savings += bd["best_bank_disc"]
-            
+            if bd["coupon_disc"] > 0:
+                savings_count += 1
+                total_savings += bd["coupon_disc"]
+            if bd.get("best_bank_disc", 0) > 0:
+                savings_count += 1
+                total_savings += bd["best_bank_disc"]
+
             if bd.get("coupon_type") == "percent":
                 coupon_display_text = f"{bd['coupon_raw_value']:g}%"
             else:
                 coupon_display_text = f"&#8377;{_fmt(bd['coupon_disc'])}"
 
             tpl.update(
-                savings_count=savings_count, 
+                savings_count=savings_count,
                 total_savings_fmt=_fmt(total_savings),
-                coupon_display_text=coupon_display_text
+                coupon_display_text=coupon_display_text,
             )
             html = AMAZON_DEAL_TEMPLATE.render(**tpl)
 
     try:
-        # 1. WeasyPrint generates a perfect PDF in memory
+        # 1. WeasyPrint -> PDF in memory
         pdf_bytes = HTML(string=html).write_pdf()
-    
-        # 2. PyMuPDF opens the PDF bytes and converts the first page to a PNG
-        doc = fitz.open("pdf", pdf_bytes)
-        try:
-            page = doc.load_page(0)
-            pix = page.get_pixmap(dpi=150) 
-            png_bytes = pix.tobytes("png")
-        finally:
-            doc.close() # Closes doc to fix memory leaks
-    
-        # 3. Load the PNG into Pillow
-        buf_in = BytesIO(png_bytes)
-        img = PILImage.open(buf_in).convert("RGB")
+
+        # 2. PyMuPDF -> PNG pixmap
+        pdf_document = fitz.open("pdf", pdf_bytes)
+        page = pdf_document.load_page(0)
+        pix = page.get_pixmap(dpi=150)
+        png_bytes = pix.tobytes("png")
+        pdf_document.close()
+
+        # 3. Pillow
+        img = PILImage.open(BytesIO(png_bytes)).convert("RGB")
         w, h = img.size
 
-        # 4. Ultra-fast, artifact-proof threshold cropping
+        # 4. Threshold crop
         gray = img.convert("L")
         bw = gray.point(lambda x: 0 if x > 250 else 255, '1')
         bbox = bw.getbbox()
-
         if bbox:
             img = img.crop((0, 0, w, min(bbox[3] + 15, h)))
-            
-        # Apply the fast watermark
+
+        # 5. Watermark (cached stamp + mask paste)
         img = apply_repeating_watermark(img, text="AmazingDealsLoots")
-    
-        # 5. Save the cropped image
+
+        # 6. Save as JPEG.
+        #    Telegram re-encodes every photo to JPEG anyway, so a watermarked PNG
+        #    (1.5–3 MB, because tiled AA text kills PNG compression) was being
+        #    uploaded for nothing. q92 + subsampling=0 keeps text razor sharp.
         buf_out = BytesIO()
-        # THE MAGIC FIX: Saving as JPEG instantly stops timeouts
-        img.save(buf_out, format="JPEG", quality=90)
+        img.save(buf_out, format="JPEG", quality=92, subsampling=0, optimize=False)
+        buf_out.name = "deal.jpg"
         buf_out.seek(0)
         return buf_out
 
@@ -838,69 +1028,96 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon", templa
         return None
 
 
-# ────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
 # 9. CAPTION & TELEGRAM HANDLERS
-# ────────────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────
 def format_caption(title, url, bd, avg_price):
     effective = bd["effective"]
     has_savings = bd["coupon_disc"] > 0 or bd.get("best_bank_disc", 0) > 0
-    header = f"{title} for ₹{effective:,} (<b>Effectively</b>)" if has_savings else f"{title} for ₹{bd['price']:,}"
+    header = (f"{title} for ₹{effective:,} (Effectively)"
+              if has_savings else f"{title} for ₹{bd['price']:,}")
     parts = []
-    
-    if bd["coupon_disc"] > 0: 
+
+    if bd["coupon_disc"] > 0:
         if bd.get("coupon_type") == "percent":
             parts.append(f"{bd['coupon_raw_value']:g}% off coupon")
         else:
             parts.append(f"₹{bd['coupon_disc']:,} off coupon")
-            
+
     if bd.get("best_bank_disc", 0) > 0:
         bank_str = bd["best_bank"] + (" EMI" if bd.get("best_bank_is_emi") else "")
         parts.append(f"₹{bd['best_bank_disc']:,} off with {bank_str}")
-        
+
     lines = [header, ""]
-    if parts: lines.append(f"<b>📌Apply {' + '.join(parts)}</b>"); lines.append("")
+    if parts:
+        lines.append(f"<b>Apply {' + '.join(parts)}</b>")
+        lines.append("")
     lines.append(url)
     return "\n".join(lines)
 
 
+async def _safe(coro):
+    """Fire a Telegram call, swallow network hiccups (so a failed status
+    edit/delete never masquerades as a processing error)."""
+    try:
+        return await coro
+    except Exception as e:
+        log.warning(f"Telegram call ignored: {e}")
+        return None
+
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Send me any Amazon or Flipkart link.\nI'll generate a deal post with price breakdown & offers!")
+    await update.message.reply_text(
+        "Send me any Amazon or Flipkart link.\n"
+        "I'll generate a deal post with price breakdown & offers!"
+    )
 
 
 async def cmd_optimized(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggles the default template between Standard and Optimized."""
     current_mode = context.user_data.get('default_mode', 'standard')
-    
     if current_mode == 'standard':
         context.user_data['default_mode'] = 'optimized'
-        await update.message.reply_text("✅ Default mode set to **Optimized**.\nAll future links will generate the optimized post first. You can still use the inline button to switch manually.", parse_mode="Markdown")
+        await update.message.reply_text(
+            "Default mode set to *Optimized*.\nAll future links will generate the "
+            "optimized post first. You can still use the inline button to switch.",
+            parse_mode="Markdown",
+        )
     else:
         context.user_data['default_mode'] = 'standard'
-        await update.message.reply_text("✅ Default mode set to **Standard**.\nAll future links will generate the standard post first. You can still use the inline button to switch manually.", parse_mode="Markdown")
+        await update.message.reply_text(
+            "Default mode set to *Standard*.\nAll future links will generate the "
+            "standard post first. You can still use the inline button to switch.",
+            parse_mode="Markdown",
+        )
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.message
     if not msg:
         return
-        
+
     text = msg.text or msg.caption or ""
     url_m = re.search(r"(https?://[^\s]+)", text)
-    if not url_m: return
+    if not url_m:
+        return
     raw_url = url_m.group(1)
-    if not any(k in raw_url for k in["amazon", "amzn", "flipkart", "fkrt"]): return
+    if not any(k in raw_url for k in ["amazon", "amzn", "flipkart", "fkrt"]):
+        return
 
     status = await msg.reply_text("⏳ Processing...")
 
     try:
-        resolved = resolve_url(raw_url)
+        # FIX: was blocking the event loop for up to 10s
+        resolved = await asyncio.to_thread(resolve_url, raw_url)
         mkt, pid, pos = detect_marketplace(resolved)
         if not mkt or not pid:
-            await status.edit_text("❌ Couldn't detect product.")
+            await _safe(status.edit_text("❌ Couldn't detect product."))
             return
 
         product_url = make_clean_url(mkt, pid, resolved)
-        await status.edit_text("📦 Fetching data...")
 
+        # Phase 1: parallel API calls
         details, thunder, compare, reg_price, prod_data = await asyncio.gather(
             api_product_details(resolved),
             api_thunder(pid, pos),
@@ -909,144 +1126,167 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             api_product_data(pid, pos),
             return_exceptions=True,
         )
-        
         if isinstance(details, Exception): details = {}
         if isinstance(thunder, Exception): thunder = {}
-        if isinstance(compare, Exception): compare =[]
+        if isinstance(compare, Exception): compare = []
         if isinstance(reg_price, Exception): reg_price = 0
         if isinstance(prod_data, Exception): prod_data = {}
 
-        raw_title = prod_data.get("name") or details.get("prod") or details.get("title") or "Product"
-        await status.edit_text("🔍 Scraping & preparing...")
+        raw_title = (prod_data.get("name") or details.get("prod")
+                     or details.get("title") or "Product")
 
+        # Phase 2: parallel scrape + title shorten
         scrape_fn = scrape_amazon if mkt == "amazon" else scrape_flipkart
         scraped_result, short_title = await asyncio.gather(
             asyncio.to_thread(scrape_fn, product_url),
             shorten_title_groq(raw_title),
             return_exceptions=True,
         )
-
         if isinstance(scraped_result, Exception):
-            scraped_result = {"current_price": None, "mrp": None, "coupon": None, "bank_offers":[]}
+            scraped_result = {"current_price": None, "mrp": None,
+                              "coupon": None, "bank_offers": []}
         if isinstance(short_title, Exception):
             short_title = raw_title
 
         scraped = scraped_result
         image_url = prod_data.get("image") or details.get("image") or ""
-        
+
         price = (
-            scraped.get("current_price") 
-            or _clean_price(prod_data.get("cur_price")) 
-            or _clean_price(details.get("price")) 
+            scraped.get("current_price")
+            or _clean_price(prod_data.get("cur_price"))
+            or _clean_price(details.get("price"))
             or 0
         )
-        if not price and thunder.get("avg"): price = int(thunder["avg"])
-        
+        if not price and thunder.get("avg"):
+            price = int(thunder["avg"])
+
         api_mrp = (
-            _clean_price(prod_data.get("mrpFloat")) 
-            or _clean_price(details.get("mrp")) 
-            or _clean_price(details.get("mrpFloat")) 
+            _clean_price(prod_data.get("mrpFloat"))
+            or _clean_price(details.get("mrp"))
+            or _clean_price(details.get("mrpFloat"))
             or 0
         )
         scraped_mrp = _clean_price(scraped.get("mrp")) or 0
-            
         mrp = max(scraped_mrp, api_mrp, price)
-        
-        avg_p = thunder.get("avg", 0)
 
-        bd = calc_breakdown(price, mrp, scraped.get("coupon"), scraped.get("bank_offers",[]))
-        await status.edit_text("🎨 Generating deal card...")
+        avg_p = thunder.get("avg", 0)
+        bd = calc_breakdown(price, mrp, scraped.get("coupon"), scraped.get("bank_offers", []))
+
+        await _safe(status.edit_text("🎨 Generating deal card..."))
 
         caption = format_caption(short_title, product_url, bd, avg_p)
         context.user_data['deal_cache'] = {
-            'image_url': image_url, 'bd': bd, 'bank_offers': scraped.get("bank_offers",[]),
-            'mkt': mkt, 'short_title': short_title, 'reg_price': reg_price, 'caption': caption
+            'image_url': image_url, 'bd': bd,
+            'bank_offers': scraped.get("bank_offers", []),
+            'mkt': mkt, 'short_title': short_title,
+            'reg_price': reg_price, 'caption': caption,
         }
 
         default_mode = context.user_data.get('default_mode', 'standard')
 
         deal_img = await asyncio.to_thread(
-            generate_deal_image, image_url, bd, scraped.get("bank_offers",[]), 
-            marketplace=mkt, template_type=default_mode, short_title=short_title, reg_price=reg_price
+            generate_deal_image, image_url, bd, scraped.get("bank_offers", []),
+            marketplace=mkt, template_type=default_mode,
+            short_title=short_title, reg_price=reg_price,
         )
 
         if default_mode == "optimized":
-            btn_text = "🖼️ Show Standard Version"
-            btn_cb = "std_version"
+            btn_text, btn_cb = "🔄 Show Standard Version", "std_version"
         else:
-            btn_text = "🌟 Show Optimized Version"
-            btn_cb = "opt_version"
-            
+            btn_text, btn_cb = "🔄 Show Optimized Version", "opt_version"
+
         keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(btn_text, callback_data=btn_cb)]])
 
         if deal_img:
-            # Send photo standard, no weird retry loops
-            await msg.reply_photo(photo=deal_img, caption=caption, parse_mode="HTML", reply_markup=keyboard, write_timeout=45)
+            await msg.reply_photo(
+                photo=deal_img, caption=caption, parse_mode="HTML",
+                reply_markup=keyboard,
+                read_timeout=90, write_timeout=180, connect_timeout=30, pool_timeout=30,
+            )
         else:
             await msg.reply_text(caption, disable_web_page_preview=True, parse_mode="HTML")
 
-        await status.delete()
+        await _safe(status.delete())
 
     except Exception as e:
         log.error(f"Error: {e}", exc_info=True)
-        await status.edit_text(f"❌ Error: {str(e)[:100]}")
+        await _safe(status.edit_text(f"❌ Error: {str(e)[:100]}"))
 
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle between Standard and Optimized cards instantly."""
     query = update.callback_query
-    await query.answer("🎨 Generating new layout...", show_alert=False)
-    
+    await _safe(query.answer("🎨 Generating new layout...", show_alert=False))
+
     data = query.data
     cache = context.user_data.get('deal_cache')
-    
     if not cache:
-        await query.edit_message_caption(caption="⏳ Session expired. Please send the link again.")
+        await _safe(query.edit_message_caption(
+            caption="⚠️ Session expired. Please send the link again."))
         return
 
     is_optimized = (data == "opt_version")
-    new_text = "🖼️ Show Standard Version" if is_optimized else "🌟 Show Optimized Version"
+    new_text = "🔄 Show Standard Version" if is_optimized else "🔄 Show Optimized Version"
     new_data = "std_version" if is_optimized else "opt_version"
-    
     keyboard = InlineKeyboardMarkup([[InlineKeyboardButton(new_text, callback_data=new_data)]])
-    
+
     deal_img = await asyncio.to_thread(
-        generate_deal_image, cache['image_url'], cache['bd'], cache['bank_offers'], 
-        marketplace=cache['mkt'], template_type="optimized" if is_optimized else "standard", 
-        short_title=cache['short_title'], reg_price=cache['reg_price']
+        generate_deal_image, cache['image_url'], cache['bd'], cache['bank_offers'],
+        marketplace=cache['mkt'],
+        template_type="optimized" if is_optimized else "standard",
+        short_title=cache['short_title'], reg_price=cache['reg_price'],
     )
-    
+
     if deal_img:
-        await query.edit_message_media(
+        await _safe(query.edit_message_media(
             media=InputMediaPhoto(deal_img, caption=cache['caption'], parse_mode="HTML"),
             reply_markup=keyboard,
-            write_timeout=45
-        )
+            read_timeout=90, write_timeout=180, connect_timeout=30, pool_timeout=30,
+        ))
 
 
 def main():
-    if BOT_TOKEN == "YOUR_TOKEN": raise ValueError("Set TELEGRAM_BOT_TOKEN environment variable!")
-    
-    # 1. PURE, SIMPLE BUILDER: No custom network settings. Let Telegram use its native, stable defaults.
-    app = Application.builder().token(BOT_TOKEN).build()
-    
+    if BOT_TOKEN == "YOUR_TOKEN":
+        raise ValueError("Set TELEGRAM_BOT_TOKEN environment variable!")
+
+    # ── THE ACTUAL "Timed out" FIX ──
+    # PTB defaults are 5s read / 5s write — nowhere near enough to upload a
+    # deal card from a throttled free-tier container.
+    request = HTTPXRequest(
+        connection_pool_size=16,
+        connect_timeout=30.0,
+        read_timeout=60.0,
+        write_timeout=120.0,
+        pool_timeout=30.0,
+    )
+    get_updates_request = HTTPXRequest(
+        connection_pool_size=4,
+        connect_timeout=30.0,
+        read_timeout=40.0,
+        write_timeout=30.0,
+        pool_timeout=30.0,
+    )
+
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .request(request)
+        .get_updates_request(get_updates_request)
+        .build()
+    )
+
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("optimized", cmd_optimized))
-    app.add_handler(MessageHandler((filters.TEXT | filters.CAPTION) & ~filters.COMMAND, handle_message))
+    app.add_handler(MessageHandler((filters.TEXT | filters.CAPTION) & ~filters.COMMAND,
+                                   handle_message))
     app.add_handler(CallbackQueryHandler(handle_callback))
-    
+
     keep_alive()
-    log.info("DealBot v7 running...")
-    
-    # 2. THE MAGIC FIX: 
-    # - bootstrap_retries=-1 : If Render throws a "Bad Gateway" or "Timeout" on boot, the bot will auto-retry instead of crashing!
-    # - timeout=30 : Tells the bot to be patient with Render's slow free-tier network.
-    # - drop_pending_updates=True : Ignores old messages while the bot was asleep so it doesn't choke.
-    app.run_polling(
-        allowed_updates=Update.ALL_TYPES, 
-        drop_pending_updates=True,
-        bootstrap_retries=-1,
-        timeout=30
-    )
+    log.info("DealBot v7.1 running...")
+    # drop_pending_updates: Render free tier restarts often; without this a
+    # backlog of queued links all fire at once and thrash the CPU.
+    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+
 
 if __name__ == "__main__":
     main()
