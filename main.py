@@ -836,23 +836,27 @@ body{ font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,A
 # ─────────────────────────────────────────────
 _WM_STAMP = None  # cached rotated watermark stamp (built once per process)
 
-
 def _get_watermark_stamp(text):
-    """Builds the rotated watermark tile ONCE and caches it.
-    Uses mode 'L' (alpha mask only) instead of RGBA — same pixels, 4x cheaper."""
     global _WM_STAMP
     if _WM_STAMP is None:
         current_dir = os.path.dirname(os.path.abspath(__file__))
         font_path = os.path.join(current_dir, "Roboto-Bold.ttf")
+
+        SCALE = 2  # supersample factor — smooths edges like the old blend method
         try:
-            font = ImageFont.truetype(font_path, 50)
+            font = ImageFont.truetype(font_path, 50 * SCALE)
         except Exception as e:
             log.error(f"Font error: {e}. Path checked: {font_path}")
             font = ImageFont.load_default()
 
-        stamp = PILImage.new("L", (600, 150), 0)
-        stamp_draw = ImageDraw.Draw(stamp)
-        stamp_draw.text((50, 50), text, fill=115, font=font)   # 115 = same opacity as before
+        # Draw at 2x resolution
+        big = PILImage.new("L", (600 * SCALE, 150 * SCALE), 0)
+        big_draw = ImageDraw.Draw(big)
+        big_draw.text((50 * SCALE, 50 * SCALE), text, fill=80, font=font)
+
+        # Downscale with LANCZOS — softens edges, closer to the old "perfect" look
+        stamp = big.resize((600, 150), PILImage.LANCZOS)
+
         _WM_STAMP = stamp.rotate(30, expand=1, resample=PILImage.BICUBIC)
     return _WM_STAMP
 
