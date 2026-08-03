@@ -1047,7 +1047,7 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon",
 def format_caption(title, url, bd, avg_price):
     effective = bd["effective"]
     has_savings = bd["coupon_disc"] > 0 or bd.get("best_bank_disc", 0) > 0
-    header = (f"{title} for ₹{effective:,} (Effectively)"
+    header = (f"{title} for ₹{effective:,} (<b>Effectively</b>)"
               if has_savings else f"{title} for ₹{bd['price']:,}")
     parts = []
 
@@ -1063,7 +1063,7 @@ def format_caption(title, url, bd, avg_price):
 
     lines = [header, ""]
     if parts:
-        lines.append(f"<b>Apply {' + '.join(parts)}</b>")
+        lines.append(f"<b>📌 Apply {' + '.join(parts)}</b>")
         lines.append("")
     lines.append(url)
     return "\n".join(lines)
