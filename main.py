@@ -1031,7 +1031,7 @@ def generate_deal_image(image_url, bd, bank_offers, marketplace="amazon",
         #    (1.5–3 MB, because tiled AA text kills PNG compression) was being
         #    uploaded for nothing. q92 + subsampling=0 keeps text razor sharp.
         buf_out = BytesIO()
-        img.save(buf_out, format="JPEG", quality=92, subsampling=0, optimize=False)
+        img.save(buf_out, format="JPEG", quality=85, subsampling=1, optimize=True)
         buf_out.name = "deal.jpg"
         buf_out.seek(0)
         return buf_out
