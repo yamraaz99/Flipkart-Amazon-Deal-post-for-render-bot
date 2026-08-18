@@ -569,7 +569,7 @@ async def shorten_title_groq(full_title):
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}",
                          "Content-Type": "application/json"},
                 json={
-                    "model": "openai/gpt-oss-20b",
+                    "model": "groq/compound-mini",
                     "messages": [
                         {"role": "system", "content":
                             "You shorten e-commerce product titles. Keep: brand, key specs "
