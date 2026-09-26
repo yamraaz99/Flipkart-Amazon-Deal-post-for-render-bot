@@ -1353,6 +1353,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         avg_p = thunder.get("avg", 0)
         bd = calc_breakdown(price, mrp, scraped.get("coupon"), scraped.get("bank_offers", []))
+        # ─────────────────────────────────────────────
+        # NEW: SMART DEAL REJECTION LOGIC
+        # ─────────────────────────────────────────────
+        if avg_p:
+            try:
+                avg_price_val = int(avg_p)
+                effective_price = bd["effective"]
+                
+                # If avg price is valid, and the effective price is strictly > 10% higher than average
+                if avg_price_val > 0 and effective_price > (avg_price_val * 1.10):
+                    reject_msg = (
+                        f"❌ <b>Deal Rejected:</b> Not a genuine loot.\n\n"
+                        f"Current Price: ₹{effective_price:,}\n"
+                        f"Historic Average: ₹{avg_price_val:,}\n\n"
+                        f"<i>(Price is more than 10% above the historical average)</i>"
+                    )
+                    await _safe(status.edit_text(reject_msg, parse_mode="HTML"))
+                    return # Stop processing and exit
+            except Exception as e:
+                log.warning(f"Error checking avg price logic: {e}")
+        # ─────────────────────────────────────────────
 
         await _safe(status.edit_text("🎨 Generating deal card..."))
 
