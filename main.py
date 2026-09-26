@@ -12,6 +12,7 @@ import asyncio
 import base64
 import datetime
 import random
+import math
 from io import BytesIO
 from urllib.parse import urlparse
 
@@ -28,6 +29,7 @@ from jinja2 import Template
 import time
 import asyncio
 import telegram.error
+from collections import Counter, defaultdict
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InputMediaPhoto
 from telegram.request import HTTPXRequest
 from telegram.ext import (
@@ -54,7 +56,6 @@ except ImportError:
     logging.warning("curl_cffi not installed — Flipkart scraping may fail")
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_TOKEN")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 EXT_ID = "7242722"
 EXT_AUTH = "788970602"
 
@@ -91,6 +92,212 @@ def _get_bank_color(bank_name):
         if key in name:
             return color
     return "#666666"
+
+# ─────────────────────────────────────────────
+# TITLE SHORTENER ALGORITHM (No LLM Required)
+# ─────────────────────────────────────────────
+UNITS = (r"(?:inch(?:es)?|in|cms?|mm|watts?|w|kw|kva|kgs?|gms?|g|ltrs?|litres?|"
+         r"tons?|stars?|hz|khz|db|v|tb|gb|k|lumens?|lm|hrs?|hours?|pcs|pieces|mah|ah)")
+SPEC = r'\d+(?:\.\d+)?\s?-?\s?' + UNITS + r'\b\.?|\d+(?:\.\d+)?"'
+TOKEN_RE = re.compile(SPEC + r'|[A-Za-z0-9][\w\'&+./°-]*|[&/]', re.I)
+SPEC_RE = re.compile(r'^(?:' + SPEC + r')$', re.I)
+MODEL_RE = re.compile(r'^(?=.*[A-Z])(?=.*\d)[A-Z0-9][A-Z0-9\-/.]{3,}$')
+PACK_RE = re.compile(r'\b(?:pack|set|box|combo)\s+of\s+\d+', re.I)
+DELIM_RE = re.compile(r'(\(|\)|\||,|;|:|\s+[-–—]\s+|\s+(?:with|for|w/)\s+)', re.I)
+FILLER_RE = re.compile(r'\ba tata product\b|\b(?:new|latest|\d{4})\s+launch(?:ed)?\b|\b\d+\s*(?:years?|yrs?|months?)\s*(?:brand\s*)?warranty\b', re.I)
+
+UNIT_FAMILY = {**dict.fromkeys(['inch','inches','in','cm','cms','mm'],'len'),
+               **dict.fromkeys(['w','watt','watts','kw'],'pow'),
+               **dict.fromkeys(['l','ltr','litre','liter','ml'],'vol'),
+               **dict.fromkeys(['g','gm','kg','kgs'],'wt'), 'mah':'cap','ah':'cap'}
+COLORS = {"black","white","grey","gray","silver","blue","red","green","pink","teal","gold","brown","purple","yellow","orange","navy","maroon","copper"}
+STOP = {"a","an","the","of","and","&","to","in","on","by","or","/","with","for"}
+
+def spec_family(tok):
+    m = re.search(r'[A-Za-z"]+$', tok)
+    u = (m.group(0) if m else '').lower().rstrip('.')
+    return UNIT_FAMILY.get(u, u)
+
+def tok_type(tok):
+    low = tok.lower()
+    if SPEC_RE.match(tok): return 'SPEC'
+    if MODEL_RE.match(tok) and (len(tok) >= 6 or '-' in tok or '/' in tok): return 'MODEL'
+    if low in COLORS: return 'COLOR'
+    if low in STOP: return 'STOP'
+    return 'WORD'
+
+class Seg:
+    def __init__(self, text, idx, paren, lead):
+        self.text, self.idx, self.paren, self.lead = text, idx, paren, lead
+        self.tokens = TOKEN_RE.findall(text)
+        self.types = [tok_type(t) for t in self.tokens]
+        self.is_pack = bool(PACK_RE.search(text))
+        self.truncated = False
+    def pure_spec(self): return bool(self.tokens) and all(t == 'SPEC' for t in self.types)
+    def absorb(self, other, sep=' '):
+        self.text += sep + other.text
+        self.tokens += other.tokens
+        self.types += other.types
+        self.is_pack |= other.is_pack
+
+class TitleShortener:
+    def __init__(self, path="kb.json"):
+        self.path = path
+        self.heads = Counter({h: 5 for h in "tv television refrigerator fridge kettle iron microphone ac gimbal marker markers fan duffle duffel speaker speakers bottles suitcase toothpaste earbuds earphones headphones neckband smartphone phone monitor printer camera mouse keyboard backpack trimmer microwave cooker heater geyser purifier cooler bulb lamp router tablet powerbank dishwasher projector".split()})
+        self.heads_bi = Counter({h: 5 for h in ["washing machine","power bank","smart tv","water bottles","trolley bag","trolley bags","split ac","window ac","car charger","dry iron","steam iron","gimbal stabilizer","bluetooth earbuds","bluetooth speaker","mixer grinder","air conditioner","air purifier","water purifier","hair dryer","vacuum cleaner","ceiling fan","table fan","google tv","pressure cooker","gas stove"]})
+        self.weak = set("mic stand case cover cable cables tripod bag bags box kit mount".split())
+        self.feat = Counter({w: 3 for w in "charging playtime warranty technology model control protection compatible compatable cord body settings built-in resistance refresh rate battery display design quality free easy use".split()})
+        self.core = Counter()
+        self.head_cand = Counter()
+        self.head_cand_brands = defaultdict(set)
+        self.series_head = {}
+        self.memory = {}
+        self.w = defaultdict(float)
+        if os.path.exists(self.path): self.load(self.path)
+
+    def load(self, path):
+        try:
+            with open(path) as f: d = json.load(f)
+            self.heads = Counter(d.get("heads", self.heads))
+            self.heads_bi = Counter(d.get("heads_bi", self.heads_bi))
+            self.feat = Counter(d.get("feat", self.feat))
+            self.core = Counter(d.get("core", {}))
+            self.weak = set(d.get("weak", self.weak))
+            self.head_cand = Counter(d.get("head_cand", {}))
+            self.head_cand_brands = defaultdict(set, {k: set(v) for k, v in d.get("head_cand_brands", {}).items()})
+            self.series_head = d.get("series_head", {})
+            self.memory = d.get("memory", {})
+            self.w = defaultdict(float, d.get("w", {}))
+        except Exception: pass
+
+    def save(self):
+        try:
+            with open(self.path, 'w') as f:
+                json.dump({"heads": dict(self.heads), "heads_bi": dict(self.heads_bi), "weak": sorted(self.weak),
+                           "core": dict(self.core), "head_cand": dict(self.head_cand),
+                           "head_cand_brands": {k: sorted(v) for k, v in self.head_cand_brands.items()},
+                           "series_head": self.series_head, "memory": self.memory, "w": dict(self.w)}, f)
+        except Exception: pass
+
+    def featureness(self, w):
+        f, c = self.feat[w], self.core[w]
+        return f / (f + c + 1) if (f or c) else 0.0
+
+    def seg_featureness(self, s):
+        ws = [t.lower() for t, ty in zip(s.tokens, s.types) if ty == 'WORD']
+        return sum(self.featureness(w) for w in ws) / len(ws) if ws else 0.0
+
+    def clean(self, title): return ' '.join(FILLER_RE.sub(' ', title).split())
+
+    def segment(self, t):
+        segs, depth, lead = [], 0, 'start'
+        for p in DELIM_RE.split(t):
+            d = p.strip(); low = d.lower()
+            if d == '(': depth += 1; lead = 'paren'; continue
+            if d == ')': depth = max(0, depth - 1); lead = 'close'; continue
+            if low in ('with', 'for', 'w/'): lead = low; continue
+            if low in ('|', ';', ':', '-', '–', '—'): lead = 'bar'; continue
+            if d == ',': lead = 'comma'; continue
+            if not d: continue
+            if lead == 'comma' and segs and segs[-1].lead in ('with', 'for') and segs[-1].paren == (depth > 0):
+                lead = segs[-1].lead
+            s = Seg(d, len(segs), depth > 0, lead)
+            if lead == 'close':
+                prev = next((x for x in reversed(segs) if not x.paren), None)
+                if prev: prev.absorb(s); lead = 'comma'; continue
+            if s.paren and s.pure_spec() and segs and segs[-1].paren and segs[-1].pure_spec():
+                segs[-1].absorb(s, ', '); continue
+            segs.append(s); lead = 'comma'
+        for i, s in enumerate(segs): s.idx = i
+        if segs and len(t) >= 140: segs[-1].truncated = True
+        return segs
+
+    def find_head(self, seg, allow_weak):
+        toks = [t.lower() for t in seg.tokens]
+        for i in range(len(toks)):
+            end = None
+            if i + 1 < len(toks) and toks[i] + ' ' + toks[i + 1] in self.heads_bi: end = i + 2
+            elif toks[i] in self.heads or (allow_weak and toks[i] in self.weak): end = i + 1
+            if end is None: continue
+            while end < len(toks) and (toks[end] in self.heads or toks[end] in self.weak): end += 1
+            return end
+        return None
+
+    def _feats(self, s, n):
+        f = {'b': 1.0, 'lead=' + s.lead: 1.0, 'paren': float(s.paren), 'pack': float(s.is_pack),
+             'model': float('MODEL' in s.types), 'pos': s.idx / max(n, 1), 'trunc': float(s.truncated),
+             'spec': sum(ty == 'SPEC' for ty in s.types) / max(len(s.tokens), 1)}
+        for t, ty in zip(s.tokens, s.types):
+            if ty == 'WORD': f['t=' + t.lower()] = 1.0
+        return f
+
+    def _p(self, f): return 1 / (1 + math.exp(-sum(self.w[k] * v for k, v in f.items())))
+
+    def seg_score(self, s, n, used_fam):
+        nt = max(len(s.tokens), 1); specs = [t for t, ty in zip(s.tokens, s.types) if ty == 'SPEC']
+        sc = 0.0
+        if 'MODEL' in s.types: sc += 3.0
+        if s.is_pack: sc += 2.5
+        ratio = len(specs) / nt
+        if specs and all(spec_family(t) in used_fam for t in specs): ratio *= 0.4
+        sc += 3.0 * ratio
+        if 'COLOR' in s.types and nt <= 3: sc += 0.5
+        if s.lead in ('with', 'for'): sc -= 2.0
+        sc -= 1.5 * s.idx / n
+        sc -= 1.5 * self.seg_featureness(s)
+        if s.truncated: sc -= 5.0
+        sc += 4 * (self._p(self._feats(s, n)) - 0.5)
+        return sc
+
+    def shorten(self, title, max_len=80, keep_len=60, learn=True):
+        if not title: return ""
+        if title in self.memory: return self.memory[title]
+        t = self.clean(title)
+        if len(t) <= keep_len: return t
+        segs = self.segment(t)
+        if not segs or not segs[0].tokens: return t[:max_len]
+        core = segs[0]; head_seg = None; extra = []
+        head_end = self.find_head(core, allow_weak=True)
+        if head_end is not None:
+            toks = core.tokens[:head_end]
+            for tok, ty in zip(core.tokens[head_end:], core.types[head_end:]):
+                if ty in ('SPEC', 'MODEL'): toks.append(tok)
+                else: break
+        else:
+            for s in segs[1:]:
+                if s.lead in ('with', 'for') or s.paren or self.seg_featureness(s) > 0.5: continue
+                e = self.find_head(s, allow_weak=False)
+                if e is not None: head_seg, extra = s, list(s.tokens[:e]); break
+            toks = list(core.tokens)
+            last = max((i for i, ty in enumerate(core.types) if ty in ('SPEC', 'MODEL')), default=-1)
+            run = toks[last + 1:]
+            if last >= 0 and run and any(self.featureness(w.lower()) > 0.5 for w in run):
+                toks = toks[:last + 1]
+            if head_seg is None:
+                key = ' '.join(w.lower() for w in core.tokens[:2])
+                if key in self.series_head: extra = self.series_head[key].split()
+                while len(extra) > 1 and re.search(r'\d', extra[0]): extra.pop(0)
+
+        core_txt = ' '.join(toks + extra)
+        used_fam = {spec_family(t) for t, ty in zip(core.tokens, core.types) if ty == 'SPEC'}
+        n, out, extras = len(segs), core_txt, []
+        for s in segs[1:]:
+            if s is head_seg or self.seg_score(s, n, used_fam) < 1.5: continue
+            txt = ' '.join(s.tokens)
+            cand = core_txt + ' (' + ', '.join(extras + [txt]) + ')'
+            if len(cand) <= max_len: extras.append(txt); out = cand
+        out = self._finalize(out)
+        self.save() # Persist any learning
+        return out
+
+    def _finalize(self, s):
+        s = re.sub(r'\s+', ' ', s).strip(' ,;:-–—|')
+        s = re.sub(r'\s+(?:with|for|and|&|of|by|to|in|on)$', '', s, flags=re.I)
+        if s.count('(') > s.count(')'): s += ')'
+        return s
+
+# Create Global Instance
+_title_shortener = TitleShortener("kb.json")
 
 
 # ─────────────────────────────────────────────
@@ -555,41 +762,6 @@ def scrape_flipkart(url):
 
     result["bank_offers"] = _extract_flipkart_bank_offers_json(html_text)
     return result
-
-
-async def shorten_title_groq(full_title):
-    if not GROQ_API_KEY:
-        return full_title
-    if len(full_title) <= 70:
-        return full_title
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}",
-                         "Content-Type": "application/json"},
-                json={
-                    "model": "groq/compound-mini",
-                    "messages": [
-                        {"role": "system", "content":
-                            "You shorten e-commerce product titles. Keep: brand, key specs "
-                            "(size, capacity, star rating, color), product type. Remove: model "
-                            "codes, marketing buzzwords, AI features, pipe-separated feature "
-                            "lists, processor names. Max ~80 characters. Return ONLY the title, "
-                            "nothing else."},
-                        {"role": "user", "content": full_title},
-                    ],
-                    "temperature": 0,
-                    "max_tokens": 100,
-                },
-            )
-            data = resp.json()
-            shortened = data["choices"][0]["message"]["content"].strip().strip('"').strip("'")
-            if shortened and len(shortened) > 10:
-                return shortened
-    except Exception:
-        pass
-    return full_title
 
 
 def calc_breakdown(price, mrp, coupon, bank_offers):
@@ -1150,16 +1322,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Phase 2: parallel scrape + title shorten
         scrape_fn = scrape_amazon if mkt == "amazon" else scrape_flipkart
-        scraped_result, short_title = await asyncio.gather(
-            asyncio.to_thread(scrape_fn, product_url),
-            shorten_title_groq(raw_title),
-            return_exceptions=True,
-        )
+        
+        scraped_result = await asyncio.to_thread(scrape_fn, product_url)
         if isinstance(scraped_result, Exception):
-            scraped_result = {"current_price": None, "mrp": None,
-                              "coupon": None, "bank_offers": []}
-        if isinstance(short_title, Exception):
-            short_title = raw_title
+            scraped_result = {"current_price": None, "mrp": None, "coupon": None, "bank_offers": []}
+            
+        # The new algorithm runs instantly locally (~50 microseconds)
+        short_title = _title_shortener.shorten(raw_title)
 
         scraped = scraped_result
         image_url = prod_data.get("image") or details.get("image") or ""
